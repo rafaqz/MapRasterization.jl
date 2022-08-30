@@ -6,6 +6,7 @@ using GeometryBasics
 using GLM
 using Makie
 using Observables
+using ImageSegmentation
 using Rasters
 using Statistics
 using Tables
