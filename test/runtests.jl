@@ -4,6 +4,7 @@ using Colors
 using Test
 using ImageIO
 using FileIO
+using ImageView
 
 @testset "_categorisecolor" begin
     cats = [
@@ -24,17 +25,19 @@ using FileIO
 end
 
 # Makie.heatmap(img)
-img = load("/home/raf/PhD/Mascarenes/Data/Books/Atlas of Mauritius/13.jpg")
-segments = seg = fast_scanning(img, 0.05)
-segments = prune_segments(seg, 
-    i -> (segment_pixel_count(seg, i) < 40), 
-    (i, j) -> (-segment_pixel_count(seg, j))
-)
-img = map(i -> segment_mean(segments,i), labels_map(segments))
-imshow(img)
-f = RasterUtils.selectcolors
-points = f(img; ncolors=10, points)
-points = f(img; ncolors=10)
+img = load("/home/raf/PhD/Mascarenes/Data/Books/Atlas of Mauritius/13.jpg") |> rotr90
+img = load("/home/raf/PhD/Mascarenes/Data/Books/La Reunion/2.jpg") |> rotr90
+img = load("/home/raf/PhD/Mascarenes/Data/Books/Forests of Mauritius/Maps/49.jpg") |> rotr90
+img = load("/home/raf/PhD/Mascarenes/Data/Books/Forests of Mauritius/Maps/52.jpg") |> rotr90
+
+points = RasterUtils.selectcolors(img; ncolors=14)
+points = RasterUtils.selectcolors(img; points)
+
+# img = load("/home/raf/PhD/Mascarenes/Data/Scans/Map/mus_soil/mus_soils_bottom.pdf")
+# seg = segments = fast_scanning(img, 0.1)
+# img = map(i -> segment_mean(segments,i), labels_map(segments))
+# imshow(img)
+
 
 hs = vec(map(x -> x.h, img))
 haist(hs; bins=2000)
@@ -61,20 +64,6 @@ segments = prune_segments(seg,
  a   (i, j) -> (-segment_pixel_count(seg, j))
 )
 
-cats = [
-    (
-        r = (mean=0.18, min=0.19, max=0.17, sd=0.05),
-        g = (mean=0.73, min=0.72, max=0.74, sd=0.05),
-        b = (mean=0.268, min=0.26, max=0.27, sd=0.05),
-    ),
-    (
-        r = (mean=0.58, min=0.59, max=0.57, sd=0.05),
-        g = (mean=0.43, min=0.42, max=0.44, sd=0.05),
-        b = (mean=0.268, min=0.26, max=0.27, sd=0.05),
-    ),
-]
-
-
 points2 = RasterUtils.selectcolors(img; points, ncolors=10)
 
 using ProfileView
@@ -82,3 +71,6 @@ using ProfileView
 Makie.heatmap(rotr90(filt))
 
 sort(vec(map(i->segment_mean(segments,i), labels_map(segments))); by=x->x.r) |> union
+
+fig = Figure()
+b = Button(fig, label="x")

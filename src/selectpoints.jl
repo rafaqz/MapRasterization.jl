@@ -91,9 +91,7 @@ function dragselect!(fig, ax, positions, pixelsize;
                     selected[] = false
                 end
             elseif event.action == Mouse.release
-                @show dragging[]
                 dragging[] = false
-                @show dragging[]
                 notify(_get(positions, section))
             end
         # Delete points with right click
