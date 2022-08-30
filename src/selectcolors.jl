@@ -149,19 +149,19 @@ end
 
 function _pixel_filter(A, points, error)
     A = HSL.(A)
-    categories = collect(skipmissing(RasterUtils._calc_category_stats(A, points)))
+    categories = collect(skipmissing(_calc_category_stats(A, points)))
     meancolors = map(categories) do cat
         HSL(map(x -> x.mean, cat)...)
     end
     filt = map(A) do x
-        c = RasterUtils._categorisecolor(x, categories)
+        c = _categorisecolor(x, categories)
         c == 0 ? RGB(1.0, 1.0, 1.0) : RGB(meancolors[c])
     end
 end
 
 function _segment_filter(A, segments, points, scan_threshold, error)
     A = HSL.(A)
-    categories = collect(skipmissing(RasterUtils._calc_category_stats(A, points)))
+    categories = collect(skipmissing(_calc_category_stats(A, points)))
     display(categories)
     meancolors = map(categories) do ctg
         HSL(map(x -> x.mean, ctg)...)
@@ -180,7 +180,7 @@ function _segment_filter(A, segments, points, scan_threshold, error)
     filt = map(enumerate(A)) do (i, x)
         seg = segments.image_indexmap[i]
         ctg = get(known_segment_categories, seg, 0)
-        ctg = ctg == 0 ? RasterUtils._categorisecolor(x, categories; error) : ctg
+        ctg = ctg == 0 ? _categorisecolor(x, categories; error) : ctg
         ctg == 0 ? RGB(1.0, 1.0, 1.0) : RGB(meancolors[ctg])
     end
 end

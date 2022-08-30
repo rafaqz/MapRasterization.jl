@@ -1,4 +1,4 @@
-name = "RasterUtils"
+name = "MapRasterization"
 uuid = "a6417e2b-f030-4652-9ab3-e9fb27b5859d"
 authors = ["Rafael Schouten <rafaelschouten@gmail.com>"]
 version = "0.1.0"

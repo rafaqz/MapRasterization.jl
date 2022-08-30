@@ -1,4 +1,4 @@
-using RasterUtils
+using MapRasterization
 using GLMakie
 using Colors
 using Test
@@ -18,10 +18,10 @@ using ImageView
             b = (mean=0.2, min=0.1, max=0a.3, sd=0.1),
         ),
     ]
-    @test RasterUtils._categorisecolor(RGB(0.3, 0.2, 0.8), cats) == 0
-    @test RasterUtils._categorisecolor(RGB(0.3, 0.2, 0.7999), cats) == 1
-    @test RasterUtils._categorisecolor(RGB(0.3, 0.2, 0.7), cats) == 1
-    @test RasterUtils._categorisecolor(RGB(0.6, 0.3, 0.2), cats) == 2
+    @test MapRasterization._categorisecolor(RGB(0.3, 0.2, 0.8), cats) == 0
+    @test MapRasterization._categorisecolor(RGB(0.3, 0.2, 0.7999), cats) == 1
+    @test MapRasterization._categorisecolor(RGB(0.3, 0.2, 0.7), cats) == 1
+    @test MapRasterization._categorisecolor(RGB(0.6, 0.3, 0.2), cats) == 2
 end
 
 # Makie.heatmap(img)
@@ -30,8 +30,8 @@ img = load("/home/raf/PhD/Mascarenes/Data/Books/La Reunion/2.jpg") |> rotr90
 img = load("/home/raf/PhD/Mascarenes/Data/Books/Forests of Mauritius/Maps/49.jpg") |> rotr90
 img = load("/home/raf/PhD/Mascarenes/Data/Books/Forests of Mauritius/Maps/52.jpg") |> rotr90
 
-points = RasterUtils.selectcolors(img; ncolors=14)
-points = RasterUtils.selectcolors(img; points)
+points = MapRasterization.selectcolors(img; ncolors=14)
+points = MapRasterization.selectcolors(img; points)
 
 # img = load("/home/raf/PhD/Mascarenes/Data/Scans/Map/mus_soil/mus_soils_bottom.pdf")
 # seg = segments = fast_scanning(img, 0.1)
@@ -60,11 +60,11 @@ segments = prune_segments(seg,
     (i, j) -> (-segment_pixel_count(seg, j))
 )
 segments = prune_segments(seg, 
-    i -> (RasterUtils._categorisecolor(segment_mean(seg, i), cats) == 0 && segment_pixel_count(seg, i) < 5), 
+    i -> (MapRasterization._categorisecolor(segment_mean(seg, i), cats) == 0 && segment_pixel_count(seg, i) < 5), 
  a   (i, j) -> (-segment_pixel_count(seg, j))
 )
 
-points2 = RasterUtils.selectcolors(img; points, ncolors=10)
+points2 = MapRasterization.selectcolors(img; points, ncolors=10)
 
 using ProfileView
 @profview 

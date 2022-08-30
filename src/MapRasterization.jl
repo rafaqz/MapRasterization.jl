@@ -1,4 +1,4 @@
-module RasterUtils
+module MapRasterization
 
 using Colors
 using ColorVectorSpace

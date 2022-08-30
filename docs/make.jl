@@ -1,16 +1,16 @@
-using RasterUtils
+using MapRasterization
 using Documenter
 
-DocMeta.setdocmeta!(RasterUtils, :DocTestSetup, :(using RasterUtils); recursive=true)
+DocMeta.setdocmeta!(MapRasterization, :DocTestSetup, :(using MapRasterization); recursive=true)
 
 makedocs(;
-    modules=[RasterUtils],
+    modules=[MapRasterization],
     authors="Rafael Schouten <rafaelschouten@gmail.com>",
-    repo="https://github.com/rafaqz/RasterUtils.jl/blob/{commit}{path}#{line}",
-    sitename="RasterUtils.jl",
+    repo="https://github.com/rafaqz/MapRasterization.jl/blob/{commit}{path}#{line}",
+    sitename="MapRasterization.jl",
     format=Documenter.HTML(;
         prettyurls=get(ENV, "CI", "false") == "true",
-        canonical="https://rafaqz.github.io/RasterUtils.jl",
+        canonical="https://rafaqz.github.io/MapRasterization.jl",
         edit_link="main",
         assets=String[],
     ),
@@ -20,6 +20,6 @@ makedocs(;
 )
 
 deploydocs(;
-    repo="github.com/rafaqz/RasterUtils.jl",
+    repo="github.com/rafaqz/MapRasterization.jl",
     devbranch="main",
 )

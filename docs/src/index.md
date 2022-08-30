@@ -1,14 +1,14 @@
 ```@meta
-CurrentModule = RasterUtils
+CurrentModule = MapRasterization
 ```
 
-# RasterUtils
+# MapRasterization
 
-Documentation for [RasterUtils](https://github.com/rafaqz/RasterUtils.jl).
+Documentation for [MapRasterization](https://github.com/rafaqz/MapRasterization.jl).
 
 ```@index
 ```
 
 ```@autodocs
-Modules = [RasterUtils]
+Modules = [MapRasterization]
 ```

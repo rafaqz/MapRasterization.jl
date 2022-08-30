@@ -78,7 +78,7 @@ uuid = "3fa0cd96-eef1-5676-8a61-b3b8758bbffb"
 deps = ["SHA", "Serialization"]
 uuid = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 
-[[deps.RasterUtils]]
+[[deps.MapRasterization]]
 path = ".."
 uuid = "a6417e2b-f030-4652-9ab3-e9fb27b5859d"
 version = "0.1.0"
