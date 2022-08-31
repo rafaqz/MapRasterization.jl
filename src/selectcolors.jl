@@ -6,8 +6,9 @@ function selectcolors(raw_map::AbstractArray{C};
     error=2.0,
     kw...
 ) where C
+    balanced_map = Observable(_balance(raw_map, points[1]))
     ncolors = length(points)
-    segments = fast_scanning(raw_map, scan_threshold) |> Observable
+    segments = fast_scanning(balanced_map[], scan_threshold) |> Observable
     pruned = if prune_threshold > 0
         prune_segments(segments[], 
             i -> (segment_pixel_count(segments[], i) < prune_threshold), 
@@ -27,20 +28,24 @@ function selectcolors(raw_map::AbstractArray{C};
     buttongrid[1, 3] = next = Button(fig, label="next")
     buttongrid[1, 4] = clear = Button(fig, label="clear")
     buttongrid[1, 5] = update = Button(fig, label="update")
+    buttongrid[1, 6] = balance = Button(fig, label="balance")
     error_labelled = labelslider!(fig, "error", 0.0:0.01:10.0; startvalue=error)
     buttongrid[1, 7] = error_labelled.layout
     error_slider = error_labelled.slider
     scan_threshold_labelled = labelslider!(fig, "scan threshold", 0.001:0.001:0.2; startvalue=scan_threshold)
-    buttongrid[1, 6] = scan_threshold_labelled.layout
+    buttongrid[1, 8] = scan_threshold_labelled.layout
     scan_threshold_slider = scan_threshold_labelled.slider
     prune_labelled = labelslider!(fig, "prune threshold", 0:200; startvalue=error)
     prune_slider = prune_labelled.slider
-    buttongrid[1, 8] = prune_labelled.layout
+    buttongrid[1, 9] = prune_labelled.layout
     # Color boxes
     fig[2, 1] = color_grid = GridLayout(tellwidth = false)
     color_boxes = color_grid[1, 1:ncolors] = map(1:ncolors) do n
         Button(fig; label=string(n), height=20, width=20, buttoncolor=_mean_point_color(segmented_map[], points[n]))
     end
+    # kepp_checks = color_grid[2, 1:ncolors] = map(1:ncolors) do n
+    #     Check(fig; label=string(n), height=20, width=20, buttoncolor=_mean_point_color(segmented_map[], points[n]))
+    # end
 
     # Images
     fig[3, 1] = plotgrid = GridLayout(tellwidth = false)
@@ -49,13 +54,13 @@ function selectcolors(raw_map::AbstractArray{C};
     ax3 = Axis(plotgrid[1, 3]; title="Output")
     linkaxes!(ax1, ax2, ax3)
     ax1.aspect = ax2.aspect = ax3.aspect = AxisAspect(1)
-    heatmap!(ax1, raw_map)
+    heatmap!(ax1, balanced_map)
     heatmap!(ax2, segmented_map)
     _plot_output!(ax3, segmented_map[], segments[], points, scan_threshold, error)
 
-    onany(scan_threshold_slider.value, prune_slider.value) do scan_threshold, prune_threshold
+    onany(scan_threshold_slider.value, prune_slider.value, balanced_map) do scan_threshold, prune_threshold, bm
         println("scanning...")
-        segments[] = fast_scanning(raw_map, scan_threshold)
+        segments[] = fast_scanning(bm, scan_threshold)
         println("pruning...")
         pruned[] = if prune_threshold > 0
             prune_segments(segments[], 
@@ -108,11 +113,15 @@ function selectcolors(raw_map::AbstractArray{C};
         deleteat!(pointvec[], eachindex(pointvec[]))
         notify(pointvec)
     end
+    on(balance.clicks) do _
+        balanced_map[] = _balance(raw_map, positions[1][])
+        notify(balanced_map)
+    end
     screen = display(fig)
     # Points
     map(enumerate(positions)) do (section, ps)
         sectioncolor = lift(ps) do pointsvec
-            _mean_point_color(raw_map, pointsvec)
+            _mean_point_color(balanced_map[], pointsvec)
         end
         labels = lift(p -> [string(section) for _ in 1:length(p)], ps)
         map((ax1, ax2, ax3)) do ax
@@ -132,6 +141,61 @@ function selectcolors(raw_map::AbstractArray{C};
         sleep(0.1)
     end
     return map(getindex, positions)
+end
+
+# function _balance(A, points)
+#     if length(points) < 8
+#         @info "need more points to balance image"
+#         return A
+#     end
+#     big_table = map(CartesianIndices(A)) do I
+#         (i=I[1], j=I[2])
+#     end |> vec
+#     little_table = map(points) do (i, j)
+#         hsl = HSL(A[round(Int, i), round(Int, j)])
+#         map(Float64, (; h=hsl.h, s=hsl.s, l=hsl.l, i, j))
+#     end |> vec
+#     model_h = lm(@formula(h ~ i + j), little_table)
+#     model_s = lm(@formula(s ~ i + j), little_table)
+#     model_l = lm(@formula(l ~ i + j), little_table)
+#     pred_h = reshape(predict(model_h, big_table), size(A))
+#     pred_s = reshape(predict(model_s, big_table), size(A))
+#     pred_l = reshape(predict(model_l, big_table), size(A))
+#     mean_h = mean(pred_h)
+#     mean_s = mean(pred_s)
+#     mean_l = mean(pred_l)
+#     balanced_map = map(A, pred_h, pred_s, pred_l) do p, h, s, l 
+#         p1 = HSL(p)
+#         RGB(HSL(p1.h-h+mean_h, p1.s-s+mean_s, p1.l-l+mean_l))
+#     end
+#     return balanced_map
+# end
+function _balance(A, points)
+    if length(points) < 8
+        @info "need more points to balance image"
+        return A
+    end
+    big_table = map(CartesianIndices(A)) do I
+        (i=I[1], j=I[2])
+    end |> vec
+    little_table = map(points) do (i, j)
+        rgb = RGB(A[round(Int, i), round(Int, j)])
+        map(Float64, (; r=rgb.r, g=rgb.g, b=rgb.b, i, j))
+    end |> vec
+    model_r = lm(@formula(r ~ i + j), little_table)
+    model_g = lm(@formula(g ~ i + j), little_table)
+    model_b = lm(@formula(b ~ i + j), little_table)
+    pred_r = reshape(predict(model_r, big_table), size(A))
+    pred_g = reshape(predict(model_g, big_table), size(A))
+    pred_b = reshape(predict(model_b, big_table), size(A))
+    mean_r = mean(pred_r)
+    mean_g = mean(pred_g)
+    mean_b = mean(pred_b)
+    balanced_map = map(A, pred_r, pred_g, pred_b) do p, r, g, b 
+        p1 = RGB(p)
+        RGB(p1.r-r+mean_r, p1.g-g+mean_g, p1.b-b+mean_b)
+    end
+    return balanced_map
 end
 
 function _plot_output!(ax, A::AbstractArray, segments, points, scan_threshold, error)
