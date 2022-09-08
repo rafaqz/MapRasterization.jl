@@ -1,127 +1,196 @@
+struct MapSelection{S,O}
+    settings::S
+    removals::Vector{Vector{Point2{Float32}}}
+    points::Vector{Vector{Point2{Float32}}}
+    output::O
+end
+
+function selectcolors(raw_map::AbstractArray, map_selection)
+    points = map_selection.points
+    removals = map_selection.removals
+    (; scan_threshold, prune_threshold, scan_threshold, prune_threshold) = map_selection.settings
+    selectcolors(raw_map; points, removals, scan_threshold, prune_threshold)
+end
 function selectcolors(raw_map::AbstractArray{C}; 
-    ncolors=1, 
-    points=[Point2{Float32}[] for _ in 1:ncolors], 
+    ncategories=15, 
+    nremovals=5, 
+    points=[Point2{Float32}[] for _ in 1:ncategories],
+    removals=[Point2{Float32}[] for _ in 1:nremovals],
     scan_threshold=0.05,
     prune_threshold=0,
-    error=2.0,
+    stripe_radius=5,
+    line_threshold=0.01,
+    line_tolerance=2.0,
+    category_tolerance=2.0,
     kw...
 ) where C
-    balanced_map = Observable(_balance(raw_map, points[1]))
-    ncolors = length(points)
-    segments = fast_scanning(balanced_map[], scan_threshold) |> Observable
-    pruned = if prune_threshold > 0
-        prune_segments(segments[], 
-            i -> (segment_pixel_count(segments[], i) < prune_threshold), 
-            (i, j) -> (-segment_pixel_count(segments[], j))
-        )
+    ncategories = length(points)
+    nremovals = length(removals)
+
+    # Output stages
+    std_map = Neighborhoods.broadcast_neighborhood(Window{5}(), raw_map) do hood, val
+        rs = std(map(n -> n.r, hood))
+        gs = std(map(n -> n.g, hood))
+        bs = std(map(n -> n.b, hood))
+        sum((rs, gs, bs))
+    end
+    stripe_map = Observable{AbstractArray}(_stripes(raw_map, radius=stripe_radius))
+    balanced_map = Observable{AbstractArray}(_balance((raw_map), points[1]))
+    known_category_map = Observable{AbstractArray}(_set_categories!(zeros(Int, size(stripe_map[])), points))
+    line_removed_map = Observable{AbstractArray}(_remove_lines(balanced_map[], removals;
+        radius=stripe_radius, threshold=line_threshold, tolerance=line_tolerance,
+    ))
+    segments = Observable{Any}(fast_scanning(PixelProp.(line_removed_map[], std_map, stripe_map[], known_category_map[]), scan_threshold))
+    pruned = Observable{Any}(_maybe_prune(segments[], prune_threshold))
+    segmented_map = Observable{AbstractArray}(map(i -> IS.segment_mean(pruned[], i), IS.labels_map(pruned[])))
+    rgb_segmented_map = Observable{AbstractArray}(RGB.(segmented_map[]))
+
+    output_map = Observable(similar(raw_map, Int))
+    categorized_map, output_map = if any(p -> length(p) > 0, points)
+        (_update(segmented_map[], segments[], points, scan_threshold, category_tolerance))
     else
-        segments[]
-    end |> Observable
-    segmented_map = map(i -> segment_mean(pruned[], i), labels_map(pruned[])) |> Observable
+        (_ -> RGB(one(eltype(raw_map)))).(raw_map), similar(raw_map, Int) 
+    end |> xs -> map(Observable{Any}, xs)
+    rgb_categorized_map = Observable{AbstractArray}(RGB.(categorized_map[]))
+
+    on(segmented_map) do sm 
+        rgb_segmented_map[] = RGB.(sm)
+    end
+    on(categorized_map) do cm 
+        rgb_categorized_map[] = RGB.(cm)
+    end
+
     # Figure
     fig = Figure()
+
     # Buttons
     section = Observable(1)
-    fig[1, 1] = buttongrid = GridLayout(tellwidth = false)
-    buttongrid[1, 1] = color_number = Label(fig, "1")
-    buttongrid[1, 2] = previous = Button(fig, label="previous")
-    buttongrid[1, 3] = next = Button(fig, label="next")
-    buttongrid[1, 4] = clear = Button(fig, label="clear")
-    buttongrid[1, 5] = update = Button(fig, label="update")
-    buttongrid[1, 6] = balance = Button(fig, label="balance")
-    error_labelled = labelslider!(fig, "error", 0.0:0.01:10.0; startvalue=error)
-    buttongrid[1, 7] = error_labelled.layout
-    error_slider = error_labelled.slider
-    scan_threshold_labelled = labelslider!(fig, "scan threshold", 0.001:0.001:0.2; startvalue=scan_threshold)
-    buttongrid[1, 8] = scan_threshold_labelled.layout
+    fig[1, 1] = panel = GridLayout(tellwidth = false)
+    panel[1, 1] = widgetgrid = GridLayout(tellwidth = false)
+    widgetgrid[1, 1] = color_number = Label(fig, "1")
+    # widgetgrid[1, 2] = previous = Button(fig, label="previous")
+    # widgetgrid[1, 3] = next = Button(fig, label="next")
+    widgetgrid[1, 2] = balance = Button(fig, label="balance")
+    widgetgrid[1, 3] = remove_lines = Button(fig, label="remove lines")
+    widgetgrid[1, 4] = clear = Button(fig, label="clear")
+    widgetgrid[1, 5] = update = Button(fig, label="update")
+    
+    # Sliders
+    panel[2, 1] = slidergrid = GridLayout(tellwidth = false)
+
+    line_threshold_labelled = labelslider!(fig, "line threshold", 0.0001:0.0001:0.1; sliderkw=(; startvalue=line_threshold))
+    line_threshold_slider = line_threshold_labelled.slider
+    slidergrid[1, 1] = line_threshold_labelled.layout
+
+    category_tolerance_labelled = labelslider!(fig, "category tolerance", -1.0:0.01:10.0; sliderkw=(; startvalue=category_tolerance))
+    slidergrid[2, 1] = category_tolerance_labelled.layout
+    category_tolerance_slider = category_tolerance_labelled.slider
+
+    line_tolerance_labelled = labelslider!(fig, "line tolerance", 0.0:0.01:10.0; sliderkw=(; startvalue=line_tolerance))
+    slidergrid[3, 1] = line_tolerance_labelled.layout
+    line_tolerance_slider = line_tolerance_labelled.slider
+
+    scan_threshold_labelled = labelslider!(fig, "scan threshold", 0.001:0.001:0.2; sliderkw=(; startvalue=scan_threshold))
+    slidergrid[4, 1] = scan_threshold_labelled.layout
     scan_threshold_slider = scan_threshold_labelled.slider
-    prune_labelled = labelslider!(fig, "prune threshold", 0:200; startvalue=error)
+
+    prune_labelled = labelslider!(fig, "prune threshold", 0:200; startvalue=prune_threshold)
     prune_slider = prune_labelled.slider
-    buttongrid[1, 9] = prune_labelled.layout
+    slidergrid[5, 1] = prune_labelled.layout
+
     # Color boxes
-    fig[2, 1] = color_grid = GridLayout(tellwidth = false)
-    color_boxes = color_grid[1, 1:ncolors] = map(1:ncolors) do n
-        Button(fig; label=string(n), height=20, width=20, buttoncolor=_mean_point_color(segmented_map[], points[n]))
+    panel[1, 2] = remove_grid = GridLayout(tellwidth = false)
+    remove_buttons = remove_grid[1, 1:nremovals] = map(1:nremovals) do n
+        Button(fig; label=string(n), height=30, width=30, buttoncolor=_mean_color(balanced_map[], removals[n]))
     end
-    # kepp_checks = color_grid[2, 1:ncolors] = map(1:ncolors) do n
-    #     Check(fig; label=string(n), height=20, width=20, buttoncolor=_mean_point_color(segmented_map[], points[n]))
-    # end
+    panel[2, 2] = color_grid = GridLayout(tellwidth = false)
+    color_buttons = color_grid[1, 1:ncategories] = map(1:ncategories) do n
+        Button(fig; label=string(n), height=30, width=30, buttoncolor=_mean_color(balanced_map[], points[n]))
+    end
 
     # Images
-    fig[3, 1] = plotgrid = GridLayout(tellwidth = false)
+    fig[2, 1] = plotgrid = GridLayout(tellwidth = false)
     ax1 = Axis(plotgrid[1, 1]; title="Source")
-    ax2 = Axis(plotgrid[1, 2]; title="Segmented")
-    ax3 = Axis(plotgrid[1, 3]; title="Output")
-    linkaxes!(ax1, ax2, ax3)
-    ax1.aspect = ax2.aspect = ax3.aspect = AxisAspect(1)
+    ax2 = Axis(plotgrid[1, 2]; title="Lines removed")
+    ax3 = Axis(plotgrid[2, 1]; title="Segmented")
+    ax4 = Axis(plotgrid[2, 2]; title="Output")
+    linkaxes!(ax1, ax2, ax3, ax4)
+    ax1.aspect = ax2.aspect = ax3.aspect = ax4.aspect = AxisAspect(1)
     heatmap!(ax1, balanced_map)
-    heatmap!(ax2, segmented_map)
-    _plot_output!(ax3, segmented_map[], segments[], points, scan_threshold, error)
+    heatmap!(ax2, line_removed_map)
+    heatmap!(ax3, rgb_segmented_map)
+    heatmap!(ax4, output_map)
 
-    onany(scan_threshold_slider.value, prune_slider.value, balanced_map) do scan_threshold, prune_threshold, bm
+    onany(scan_threshold_slider.value, prune_slider.value, line_removed_map) do scan_threshold, prune_threshold, bm
         println("scanning...")
-        segments[] = fast_scanning(bm, scan_threshold)
+        segments[] = fast_scanning(PixelProp.(bm, std_map, stripe_map[], known_category_map[]), scan_threshold)
         println("pruning...")
-        pruned[] = if prune_threshold > 0
-            prune_segments(segments[], 
-                i -> (segment_pixel_count(segments[], i) < prune_threshold), 
-                (i, j) -> (-segment_pixel_count(segments[], j))
-            )
-        else
-            segments[]
-        end
+        pruned[] = _maybe_prune(segments[], prune_threshold)
         println("plotting...")
-        segmented_map[] = map(i -> segment_mean(pruned[], i), labels_map(pruned[]))
+        segmented_map[] = map(i -> IS.segment_mean(pruned[], i), IS.labels_map(pruned[]))
         notify(segmented_map)
     end
 
-    map(enumerate(color_boxes)) do (i, cb)
+    map(enumerate(remove_buttons)) do (i, cb)
+        on(cb.clicks) do _
+            section[] = i+ncategories
+            notify(section)
+        end
+    end
+    map(enumerate(color_buttons)) do (i, cb)
         on(cb.clicks) do _
             section[] = i
             notify(section)
         end
     end
 
-    positions = map(Observable, points)
-    map(positions, color_boxes) do pv, cb
-        on(pv) do pv
-            cb.buttoncolor[] = _mean_point_color(segmented_map[], pv)
-        end
+    # Button inputs
+    on(balance.clicks) do _
+        balanced_map[] = _balance(raw_map, points_obs[1][])
+        notify(balanced_map)
+    end
+    on(remove_lines.clicks) do _
+        line_removed_map[] = _remove_lines(balanced_map[], map(getindex, points_obs[ncategories+1:end]);
+            radius=stripe_radius, threshold=line_threshold_slider.value[], tolerance=line_tolerance_slider.value[],
+        )
+        notify(line_removed_map)
     end
     on(update.clicks) do _
-        _plot_output!(ax3, segmented_map[], pruned[], map(getindex, positions), scan_threshold_slider.value[], error_slider.value[])
+        categorized_map[], output_map[] = _update(
+            segmented_map[], segments[], map(getindex, points_obs[1:ncategories]), 
+            scan_threshold_slider.value[], category_tolerance_slider.value[]
+        )
+        notify(categorized_map)
     end
-
     on(section) do n
         color_number.text[] = string(n)
         notify(color_number.text)
     end
-    on(previous.clicks) do _
-        if section[] > 1
-            section[] -= 1
-            notify(section)
-        end
-    end
-    on(next.clicks) do _
-        if section[] < ncolors
-            section[] += 1
-            notify(section)
-        end
-    end
     on(clear.clicks) do _
-        pointvec = positions[section[]]
+        pointvec = points_obs[section[]]
         deleteat!(pointvec[], eachindex(pointvec[]))
         notify(pointvec)
     end
-    on(balance.clicks) do _
-        balanced_map[] = _balance(raw_map, positions[1][])
-        notify(balanced_map)
-    end
+
     screen = display(fig)
-    # Points
-    map(enumerate(positions)) do (section, ps)
+
+    # Interactive point editing
+    points_obs = map(Observable, vcat(points, removals))
+    map(points_obs, vcat(color_buttons, remove_buttons)) do pv, b
+        on(pv) do pv
+            b.buttoncolor[] = _mean_color(balanced_map[], pv)
+        end
+    end
+    map(enumerate(points_obs)) do (i, pv)
+        on(pv) do pv
+            A = known_category_map[]
+            replace!(A, i => 0)
+            _set_categories!(A, pv, i)
+        end
+    end
+    map(enumerate(points_obs)) do (section, ps)
         sectioncolor = lift(ps) do pointsvec
-            _mean_point_color(balanced_map[], pointsvec)
+            _mean_color(balanced_map[], pointsvec)
         end
         labels = lift(p -> [string(section) for _ in 1:length(p)], ps)
         map((ax1, ax2, ax3)) do ax
@@ -133,178 +202,66 @@ function selectcolors(raw_map::AbstractArray{C};
             )
         end
     end
-    dragselect!(fig, ax1, positions, size(raw_map); section, kw...)
-    dragselect!(fig, ax2, positions, size(raw_map); section, kw...)
-    dragselect!(fig, ax3, positions, size(raw_map); section, kw...)
-    println("Select points in rasters, then close the window")
+
+    dragselect!(fig, ax1, points_obs, size(raw_map); section, kw...)
+    dragselect!(fig, ax2, points_obs, size(raw_map); section, kw...)
+    dragselect!(fig, ax3, points_obs, size(raw_map); section, kw...)
+    dragselect!(fig, ax4, points_obs, size(raw_map); section, kw...)
+
+    # Wait 
     while screen.window_open[] 
         sleep(0.1)
     end
-    return map(getindex, positions)
+
+    # Results
+    removals = map(getindex, points_obs[1+ncategories:nremovals+ncategories])
+    points = map(getindex, points_obs[1:ncategories])
+    settings = (
+        scan_threshold=scan_threshold_slider.value[],
+        prune_threshold=prune_slider.value[],
+        line_tolerance=line_tolerance_slider.value[],
+        category_tolerance=category_tolerance_slider.value[],
+    )
+
+    return MapSelection(settings, removals, points, output_map[])
 end
 
-# function _balance(A, points)
-#     if length(points) < 8
-#         @info "need more points to balance image"
-#         return A
-#     end
-#     big_table = map(CartesianIndices(A)) do I
-#         (i=I[1], j=I[2])
-#     end |> vec
-#     little_table = map(points) do (i, j)
-#         hsl = HSL(A[round(Int, i), round(Int, j)])
-#         map(Float64, (; h=hsl.h, s=hsl.s, l=hsl.l, i, j))
-#     end |> vec
-#     model_h = lm(@formula(h ~ i + j), little_table)
-#     model_s = lm(@formula(s ~ i + j), little_table)
-#     model_l = lm(@formula(l ~ i + j), little_table)
-#     pred_h = reshape(predict(model_h, big_table), size(A))
-#     pred_s = reshape(predict(model_s, big_table), size(A))
-#     pred_l = reshape(predict(model_l, big_table), size(A))
-#     mean_h = mean(pred_h)
-#     mean_s = mean(pred_s)
-#     mean_l = mean(pred_l)
-#     balanced_map = map(A, pred_h, pred_s, pred_l) do p, h, s, l 
-#         p1 = HSL(p)
-#         RGB(HSL(p1.h-h+mean_h, p1.s-s+mean_s, p1.l-l+mean_l))
-#     end
-#     return balanced_map
-# end
-function _balance(A, points)
-    if length(points) < 8
-        @info "need more points to balance image"
-        return A
+function _set_categories!(A, points::AbstractArray{<:AbstractArray})
+    fill!(A, 0)
+    for (i, pointvec) in enumerate(points)
+        _set_categories!(A, pointvec, i)
     end
-    big_table = map(CartesianIndices(A)) do I
-        (i=I[1], j=I[2])
-    end |> vec
-    little_table = map(points) do (i, j)
-        rgb = RGB(A[round(Int, i), round(Int, j)])
-        map(Float64, (; r=rgb.r, g=rgb.g, b=rgb.b, i, j))
-    end |> vec
-    model_r = lm(@formula(r ~ i + j), little_table)
-    model_g = lm(@formula(g ~ i + j), little_table)
-    model_b = lm(@formula(b ~ i + j), little_table)
-    pred_r = reshape(predict(model_r, big_table), size(A))
-    pred_g = reshape(predict(model_g, big_table), size(A))
-    pred_b = reshape(predict(model_b, big_table), size(A))
-    mean_r = mean(pred_r)
-    mean_g = mean(pred_g)
-    mean_b = mean(pred_b)
-    balanced_map = map(A, pred_r, pred_g, pred_b) do p, r, g, b 
-        p1 = RGB(p)
-        RGB(p1.r-r+mean_r, p1.g-g+mean_g, p1.b-b+mean_b)
+    return A
+end
+function _set_categories!(A, pointvec::AbstractArray{<:Point2}, i)
+    for p in pointvec
+        A[_point_index(p)...] = i
     end
-    return balanced_map
 end
 
-function _plot_output!(ax, A::AbstractArray, segments, points, scan_threshold, error)
-    out = if any(map(>(0), length.(points)))
-        _segment_filter(A, segments, points, scan_threshold, error)
-        # _pixel_filter(A, points, error)
+function _update(A::AbstractArray, segments, points, scan_threshold, category_tolerance)
+    pixels, values = _categorize(A, segments, points, scan_threshold, category_tolerance)
+    # category_colors = (map(p -> _mean_color(pixels, p), points)...,)
+    # missingval = RGBA(RGB(oneunit(first(pixels))), 0)
+    # cleanedcolors = clean_categories(pixels; 
+    #     category_colors, keep_neigborless=true, missingval
+    # )
+    pixels, values
+end
+
+function _maybe_prune(segments, prune_threshold)
+    if prune_threshold > 0
+        # prune_segments(segments, 
+        #     i -> (segment_pixel_count(segments[], i) < prune_threshold), 
+        #     (i, j) -> (-segment_pixel_count(segments[], j))
+        # )
+        segments
     else
-        HSL.((_ -> one(eltype(A))).(A))
-    end
-    finallimits = ax.finallimits[]
-    heatmap!(ax, out)
-    ax.finallimits[] = finallimits
-    notify(ax.finallimits)
-end
-
-function _pixel_filter(A, points, error)
-    A = HSL.(A)
-    categories = collect(skipmissing(_calc_category_stats(A, points)))
-    meancolors = map(categories) do cat
-        HSL(map(x -> x.mean, cat)...)
-    end
-    filt = map(A) do x
-        c = _categorisecolor(x, categories)
-        c == 0 ? RGB(1.0, 1.0, 1.0) : RGB(meancolors[c])
+        segments
     end
 end
 
-function _segment_filter(A, segments, points, scan_threshold, error)
-    A = HSL.(A)
-    categories = collect(skipmissing(_calc_category_stats(A, points)))
-    display(categories)
-    meancolors = map(categories) do ctg
-        HSL(map(x -> x.mean, ctg)...)
-    end
-    ctg_segments = map(enumerate(points)) do (ctg, pointvec)
-        map(pointvec) do p
-            [begin
-                I = map(c -> round(Int, c), p) 
-                N = I[1] + i, I[2] + j
-                segments.image_indexmap[N...] => ctg
-             end for i in -1:1, j in -1:1]
-        end |> hcat
-    end
-    known_segment_categories = Dict(vcat(ctg_segments...))
-    @show meancolors
-    filt = map(enumerate(A)) do (i, x)
-        seg = segments.image_indexmap[i]
-        ctg = get(known_segment_categories, seg, 0)
-        ctg = ctg == 0 ? _categorisecolor(x, categories; error) : ctg
-        ctg == 0 ? RGB(1.0, 1.0, 1.0) : RGB(meancolors[ctg])
-    end
-end
-
-function _mean_point_color(A::AbstractArray, pointsvec)
-    stats = _calc_category_stats(A, pointsvec, 0)
-    return ismissing(stats) ? one(RGB(first(A))) : RGB(map(s -> s.mean, stats)...)
-end
-
-function _categorisecolor(x::C, categories; error=2.0) where C
-    nt = _asnamedtuple(x)
-    errs = map(categories) do category
-        ((x.h - category.h.mean)/360)^2 + (x.l - category.l.mean)^2# + (x.l - category.l.mean)^2 
-    end
-    _, best = findmin(errs)
-    # return best
-    isincategory = all(map(nt[(:h, :s)], categories[best][(:h, :s)]) do val, stats
-        (val >= stats.min - stats.sd * error) && (val <= stats.max + stats.sd * error)
-    end)
-    return isincategory ? best : 0
-end
-
-function _calc_category_stats(A, pointvecs::AbstractArray{<:AbstractArray})
-    _calc_category_stats.(Ref(A), pointvecs, eachindex(pointvecs))
-end
-function _calc_category_stats(A, pointvec::AbstractArray, cat::Int)
-    length(pointvec) == 0 && return missing
-    colors = map(pointvec) do P
-        I = map(p -> round(Int, p), P)
-        A[I...]
-    end
-    color_components = map(_keysnamedtuple(first(colors))) do k
-        [getfield(c, k) for c in colors]
-    end
-    # Ouputput a NamedTuple of NamedTuple, like:
-    # (r=(mean=?, min=?, max=?, sd=?, g=(mean=?...
-    map(color_components) do c
-        (; category=cat, mean=mean(c), min=minimum(c), max=maximum(c), sd=std(c))
-    end
-end
-
-function _asnamedtuple(x::T) where T
-    fnames = fieldnames(T)
-    NamedTuple{fnames}(map(fn -> getfield(x, fn), fnames))
-end
-# @generated function _asnamedtuple2(x)
-#     expr = Expr(:tuple)
-#     fnames = fieldnames(x)
-#     for nm in fnames
-#         push!(expr.args, Expr(:., x, nm))
-#     end
-#     :(NamedTuple{$(QuoteNode(fnames))}($expr))
-#     expr
-# end
-
-_keysnamedtuple(nt::NamedTuple) = NamedTuple{keys(nt)}(keys(nt))
-_keysnamedtuple(x) = _keysnamedtuple(_asnamedtuple(x))
-
-function _fitgradient(points)
-    x_model = lm(@formula(x_unknown ~ x_known + y_known), points)
-    y_model = lm(@formula(y_unknown ~ y_known + x_known), points)
-    return x_model, y_model
+function _mean_color(A::AbstractMatrix{C}, pointvec::AbstractVector) where C<:Colorant
+    stats = _component_stats(A, pointvec, 0)
+    return ismissing(stats) ? C(zero(RGB(first(A)))) : C(map(s -> s.mean, stats)...)
 end

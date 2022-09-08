@@ -7,7 +7,6 @@ using ImageIO
 using FileIO
 using ImageView
 using GLM
-using Neighborhoods
 using DynamicGrids
 using DynamicGrids: Neighborhoods
 
@@ -29,91 +28,57 @@ using DynamicGrids: Neighborhoods
     @test MapRasterization._categorisecolor(RGB(0.6, 0.3, 0.2), cats) == 2
 end
 
-
 # Makie.heatmap(img)
 img = load("/home/raf/PhD/Mascarenes/Data/Books/Atlas of Mauritius/3.jpg") |> rotr90
 img = load("/home/raf/PhD/Mascarenes/Data/Books/Atlas of Mauritius/13.jpg") |> rotr90
+img = load("/home/raf/PhD/Mascarenes/Data/Books/Atlas of Mauritius/6.jpg") |> rotr90
 img = load("/home/raf/PhD/Mascarenes/Data/Books/La Reunion/20.jpg") |> rotr90
 img = load("/home/raf/PhD/Mascarenes/Data/Books/Forests of Mauritius/Maps/49.jpg") |> rotr90
 img = load("/home/raf/PhD/Mascarenes/Data/Books/Forests of Mauritius/Maps/52.jpg") |> rotr90
-
 imshow(img)
-imshow(tweaked)
 
-points = MapRasterization.selectcolors(img; ncolors=15)
-points = MapRasterization.selectcolors(img; points)
+output = MapRasterization.selectcolors(img)
+output = MapRasterization.selectcolors(img, output)
+imshow(output.output)
+imshow(nolines)
+x = RGBA(img[1], 0)
 
-big_table = map(img, CartesianIndices(img)) do pixel, I
-    hsl = HSL(pixel)
-    map(Float64, (h=hsl.h, s=hsl.s, l=hsl.l, i=I[1], j=I[2]))
-end |> vec
-little_table = map(points[1]) do (i, j)
-    hsl = HSL(img[round(Int, i), round(Int, j)])
-    map(Float64, (; h=hsl.h, s=hsl.s, l=hsl.l, i, j))
-end |> vec
-model_h = lm(@formula(h ~ i + j), little_table)
-model_s = lm(@formula(s ~ i + j), little_table)
-model_l = lm(@formula(l ~ i + j), little_table)
-pred_h = reshape(predict(model_h, big_table), size(img))
-mean_h = mean(pred_h)
-pred_s = reshape(predict(model_s, big_table), size(img))
-mean_s = mean(pred_s)
-pred_l = reshape(predict(model_l, big_table), size(img))
-heatmap(pred_s)
-mean_l = mean(pred_l)
-tweaked = map(img, pred_h, pred_s, pred_l) do p, h, s, l 
-    p1 = HSL(p)
-    RGB(HSL(p1.h-h+mean_h, p1.s-s+mean_s, p1.l-l+mean_l))
+stripes = MapRasterization._stripes(img; radius=3)
+stds = Neighborhoods.broadcast_neighborhood(Window{5}(), img) do hood, val
+    rs = std(map(n -> n.r, hood))
+    gs = std(map(n -> n.g, hood))
+    bs = std(map(n -> n.b, hood))
+    sum((rs, gs, bs))
 end
-
-points = MapRasterization.selectcolors(tweaked; ncolors=14)
-
-
-hood = LayeredPositional(
-    vert=Positional((-1, 0), (1, 0)),
-    horz=Positional((0, -1), (0, 1)),
-    angle45=Positional((-1, -1), (1, 1)),
-    angle135=Positional((-1, 1), (1, -1)),
-)
-
-hood = LayeredPositional(
-    vert=Positional((-2, 0), (-1, 0), (1, 0), (1, 0)),
-    horz=Positional((0, -2), (0, -1), (0, 1), (0, 2)),
-    angle45=Positional((-2, -2), (-1, -1), (1, 1), (2, 2)),
-    angle135=Positional((-2, 2), (-1, 1), (1, -1), (2, -2)),
-)
-
-vert = Neighborhoods.broadcast_neighborhood(hood, img) do hood, val
-    l = HSL(val).l
-    dirs = map(neighbors(hood)) do layer
-        sum(layer) do n
-            (l - HSL(n).l)^2
-        end
-    end
-    (dirs.vert - dirs.horz)#^2 + 
+cstds = Neighborhoods.broadcast_neighborhood(Window{8}(), stds) do hood, val
+    count(>(0.05), hood) >= length(hood) * 0.7 
 end
-angle = Neighborhoods.broadcast_neighborhood(hood, img) do hood, val
-    l = HSL(val).l
-    dirs = map(neighbors(hood)) do layer
-        sum(layer) do n
-            (l - HSL(n).l)^2
-        end
-    end
-    (dirs.angle45 - dirs.angle135)
-end
-blurred = Neighborhoods.broadcast_neighborhood(Window{5}(), angle) do hood, val
+heatmap(cstds)
+heatmap(stds)
+bstripes = Neighborhoods.broadcast_neighborhood(Window{1}(), last.(stripes)) do hood, val
     mean(hood)
 end
-heatmap(img; alpha=0.5)
-heatmap(angle)# .< -0.05)
-heatmap(blurred .> 0.05)
-heatmap(max.(blurred, 0).^2 - angle.^3 .> 0.01)
-heatmap(classified .>  0.1)
+# heatmap(last.(stripes))
+fig = Figure()
+ax1 = Axis(fig[1, 1]; title="Source")
+ax2 = Axis(fig[1, 2]; title="Stripes")
+ax3 = Axis(fig[1, 3]; title="Stripes")
+linkaxes!(ax1, ax2, ax3)
+heatmap!(ax1, img)
+heatmap!(ax2, stds)
+heatmap!(ax3, stds .> 0.05)
 
-# img = load("/home/raf/PhD/Mascarenes/Data/Scans/Map/mus_soil/mus_soils_bottom.pdf")
-# seg = segments = fast_scanning(img, 0.1)
-# img = map(i -> segment_mean(segments,i), labels_map(segments))
-# imshow(img)
+heatmap!(ax3, bstripes .> 0.002)
+
+# heatmap!(ax3, nolines)
+
+stripes = MapRasterization._stripes(img; radius=3)
+heatmap((x -> (x < -0.01) & (x > -0.1)).(last.(stripes)))
+blurred = Neighborhoods.broadcast_neighborhood(Window{2}(), last.(stripes)) do hood, val
+    mean(hood)
+end
+heatmap(blurred)
+heatmap((x -> (x < -0.005) & (x > -0.05)).(blurred))
 
 
 hs = vec(map(x -> x.h, img))
@@ -146,8 +111,28 @@ points2 = MapRasterization.selectcolors(img; points, ncolors=10)
 using ProfileView
 @profview 
 Makie.heatmap(rotr90(filt))
-
+a
 sort(vec(map(i->segment_mean(segments,i), labels_map(segments))); by=x->x.r) |> union
 
 fig = Figure()
 b = Button(fig, label="x")
+
+hood = MapRasterization.cross_layer_neig1borhood(2)
+A = (1:2:20) * (1:10)'
+A = Neighborhoods.pad_array(A, hood)
+hood = Neighborhoods.updatewindow(hood, A, 1, 1)
+hood._window
+neighbors(hood)
+
+g1, g2 = group_colors(colorvec)
+g1
+g2
+using Colors: N0f8
+
+x = Float64.(reinterpret(reshape, N0f8, reinterpret(Tuple{N0f8,N0f8,N0f8}, vec(img))))
+r = kmeans(x, 10)
+
+im = reshape(r.assignments, size(img))
+heatmap(im)
+heatmap(img)
+

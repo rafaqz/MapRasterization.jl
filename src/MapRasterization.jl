@@ -2,17 +2,28 @@ module MapRasterization
 
 using Colors
 using ColorVectorSpace
+using Combinatorics
+using DynamicGrids
 using GeometryBasics
 using GLM
+using InvertedIndices
 using Makie
 using Observables
-using ImageSegmentation
+using LinearAlgebra
 using Rasters
 using Statistics
-using Tables
 
+import Tables
+import ImageSegmentation as IS
+
+using DynamicGrids.Neighborhoods
 using Rasters.LookupArrays
 
+include("balance.jl")
+include("scan.jl")
+include("categories.jl")
+include("clean.jl")
+include("stripes.jl")
 include("selectpoints.jl")
 include("selectcolors.jl")
 include("warp.jl")
