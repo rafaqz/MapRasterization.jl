@@ -1,7 +1,6 @@
 function _balance(A, points)
     if length(points) < 8
-        @info "need more points to balance image"
-        return A
+        return A .* 1.0
     end
     big_table = map(CartesianIndices(A)) do I
         (i=I[1], j=I[2])
@@ -19,10 +18,10 @@ function _balance(A, points)
     mean_r = mean(pred_r)
     mean_g = mean(pred_g)
     mean_b = mean(pred_b)
-    balanced_map = map(A, pred_r, pred_g, pred_b) do p, r, g, b 
+    balanced_map = broadcast(A, pred_r, pred_g, pred_b) do p, r, g, b 
         p1 = RGB(p)
         means = (p1.r-r+mean_r, p1.g-g+mean_g, p1.b-b+mean_b)
-        RGB(map(x -> min(1, max(x, 0)), means)...)
+        RGB(map(x -> min(1, max(x, 0)), means)...) .* 1.0
     end
     return balanced_map
 end

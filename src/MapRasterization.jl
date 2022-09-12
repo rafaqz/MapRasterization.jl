@@ -27,5 +27,6 @@ include("stripes.jl")
 include("selectpoints.jl")
 include("selectcolors.jl")
 include("warp.jl")
+include("blur.jl")
 
 end

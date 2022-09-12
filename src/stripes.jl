@@ -44,17 +44,18 @@ function _mean_point_stripyness(A::AbstractMatrix, pointvec::AbstractVector{<:Po
     length(pointvec) == 0 ? 0.0 : map(P -> _point_value(A, P), pointvec)
 end
 
-function _remove_lines(A, pointvecs; tolerance=2.0, threshold=0.01, kw...)
-    categories = collect(skipmissing(_component_stats(A, pointvecs)))
-    if length(categories) > 0
-        stripyness = _stripes(A; kw...)
-        stripyness = (xs -> sum(map(abs, xs))).(stripyness)
-        stripyness = broadcast_neighborhood((h, _) -> mean(h), Window{7}(), stripyness)
-        point_stripyness = _mean_point_stripyness(A, pointvecs)
+function _remove_lines(A, pointvec; stds=_stds(A), tolerance=2.0, threshold=0.01, kw...)
+    # categories = collect(skipmissing(_component_stats(A, pointvecs)))
+    # if length(categories) > 0
+        m = maximum(stds) * threshold
+        # stripyness = _stripes(A; kw...)
+        # stripyness = (xs -> sum(map(abs, xs))).(stripyness)
+        # stripyness = broadcast_neighborhood((h, _) -> mean(h), Window{7}(), stripyness)
+        # point_stripyness = _mean_point_stripyness(A, pointvecs)
         empty = RGBA(one(first(A)), 0)
-        destriped = broadcast(A, stripyness) do pixel, strp
+        destriped = broadcast(A, stds) do pixel, std
             a = RGBA(pixel)
-            if strp > threshold
+            if std >= threshold
                 # c = _categorise_color(a, categories; tolerance)
                 # c == 0 ? a : RGBA(one(pixel), 0)
                 empty
@@ -62,12 +63,12 @@ function _remove_lines(A, pointvecs; tolerance=2.0, threshold=0.01, kw...)
                 a
             end
         end
-        hood = Moore{2}()
-        broadcast_neighborhood(hood, destriped, A) do (dh, ah), (d, a)
-            d === empty || return d # not empty, nothing to do here
-            return RGBA(all(==(empty), dh) ? d : a)
-        end
-    else
-        RGBA.(A)
-    end
+        # hood = Moore{2}()
+        # broadcast_neighborhood(hood, destriped, A) do (dh, ah), (d, a)
+        #     d === empty || return d # not empty, nothing to do here
+        #     return RGBA(all(==(empty), dh) ? d : a)
+        # end
+    # else
+        # RGBA.(A)
+    # end
 end

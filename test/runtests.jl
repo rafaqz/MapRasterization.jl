@@ -9,7 +9,9 @@ using ImageView
 using GLM
 using DynamicGrids
 using DynamicGrids: Neighborhoods
-
+using ImageCore
+using JSON3
+a
 @testset "_categorisecolor" begin
     cats = [
         (
@@ -34,17 +36,19 @@ img = load("/home/raf/PhD/Mascarenes/Data/Books/Atlas of Mauritius/13.jpg") |> r
 img = load("/home/raf/PhD/Mascarenes/Data/Books/Atlas of Mauritius/6.jpg") |> rotr90
 img = load("/home/raf/PhD/Mascarenes/Data/Books/La Reunion/20.jpg") |> rotr90
 img = load("/home/raf/PhD/Mascarenes/Data/Books/Forests of Mauritius/Maps/49.jpg") |> rotr90
+img = load("/home/raf/PhD/Mascarenes/Data/Books/Forests of Mauritius/Maps/50.jpg") |> rotr90
 img = load("/home/raf/PhD/Mascarenes/Data/Books/Forests of Mauritius/Maps/52.jpg") |> rotr90
-imshow(img)
 
-output = MapRasterization.selectcolors(img)
+output = MapRasterization.selectcolors(img; ncategories=10)
 output = MapRasterization.selectcolors(img, output)
+write("13.json", JSON3.write(output))
+output = JSON3.read(read("output.json"), MapRasterization.MapSelection)
 imshow(output.output)
 imshow(nolines)
 x = RGBA(img[1], 0)
 
 stripes = MapRasterization._stripes(img; radius=3)
-stds = Neighborhoods.broadcast_neighborhood(Window{5}(), img) do hood, val
+stds = Neighborhoods.broadcast_neighborhood(Window{2}(), img) do hood, val
     rs = std(map(n -> n.r, hood))
     gs = std(map(n -> n.g, hood))
     bs = std(map(n -> n.b, hood))
@@ -71,6 +75,7 @@ heatmap!(ax3, stds .> 0.05)
 heatmap!(ax3, bstripes .> 0.002)
 
 # heatmap!(ax3, nolines)
+RGBA(RGB(1.0), 1) + RGBA(RGB(1), 1) 
 
 stripes = MapRasterization._stripes(img; radius=3)
 heatmap((x -> (x < -0.01) & (x > -0.1)).(last.(stripes)))
@@ -135,4 +140,3 @@ r = kmeans(x, 10)
 im = reshape(r.assignments, size(img))
 heatmap(im)
 heatmap(img)
-
