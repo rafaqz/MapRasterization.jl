@@ -1,3 +1,4 @@
+const DEFAULT_MATCH = Val{(:color,:std,:stripe)}()
 
 struct PixelProp{C<:Colorant,SD<:Real,SP<:Tuple{Real,Real}}
     color::C
@@ -43,17 +44,6 @@ meantype(::Type{T}) where T = typeof(zero(IS.accum_type(T))/2)
 
 _combine(arrays::AbstractArray...) = map((c, sd, sp) -> PixelProp(c, sd, sp), arrays...)
 
-# # default_diff_fn(c1::CT1, c2::CT2) where {CT1<:Union{Colorant,Real}, CT2<:Union{Colorant,Real}} = sqrt(_abs2(c1-IS.accum_type(c2)))
-# function default_diff_fn(t1::PixelProp, t2::PixelProp)
-#     sqrt(
-#         _abs2(t1.color - t2.color)# + 
-#         # _abs2(t1.std - t2.std) * 5# +
-#         # _abs2(t1.stripe[1] - t2.stripe[1]) * 5 + 
-#         # _abs2(t1.stripe[2] - t2.stripe[2]) * 5
-#     )
-# end
-# default_diff_fn(x1::Real, x2::Real) = abs2(x1 - x2)
-
 _abs2(c::IS.MathTypes) = mapreducec(v -> float(v)^2, +, 0, c)
 _abs2(x) = abs2(x)
 
@@ -62,10 +52,12 @@ getscalar(A::AbstractArray{T,N}, i::CartesianIndex{N}, block_length::CartesianIn
 
 getscalar(a::Real, i...) = a
 
-fast_scanning(img::AbstractArray, threshold::Real, diff_fn::Function = _category_error) =
-    fast_scanning!(fill(-1, axes(img)), img, threshold, diff_fn)
+fast_scanning(img::AbstractArray, threshold::Real; kw...) =
+    fast_scanning!(fill(-1, axes(img)), img, threshold; kw...)
 
-function fast_scanning!(result, img::AbstractArray{CT,N}, threshold::Union{AbstractArray,Real}, diff_fn::DF = _category_error) where {CT,N,DF<:Function}
+function fast_scanning!(result, img::AbstractArray{CT,N}, threshold::Union{AbstractArray,Real};
+    match::Val=DEFAULT_MATCH,
+) where {CT,N,DF<:Function}
 
     # Neighbourhood function
     _diagmN = Diagonal([1 for i in 1:N])
@@ -90,7 +82,7 @@ function fast_scanning!(result, img::AbstractArray{CT,N}, threshold::Union{Abstr
         for p in neighbourhood(point)
             if checkbounds(Bool, img, p)
                 root_p = IS.find_root!(temp_labels, result[p])
-                if diff_fn(region_means[root_p], img[point]) < IS.getscalar(threshold, point, block_length)
+                if _category_error(region_means[root_p], img[point], match) < IS.getscalar(threshold, point, block_length)
                     if prev_label == 0
                         prev_label = root_p
                     elseif prev_label != root_p

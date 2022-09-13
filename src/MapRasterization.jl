@@ -8,6 +8,7 @@ using GeometryBasics
 using GLM
 using InvertedIndices
 using Makie
+using MixedModels
 using Observables
 using LinearAlgebra
 using Rasters

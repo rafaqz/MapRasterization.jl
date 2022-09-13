@@ -43,14 +43,14 @@ end
 
 # Categorize an array of pixels
 function _categorize!(pixels::AbstractArray, segments, points;
-    scan_threshold, tolerances, prune_threshold, category_stats, pixelprops,
+    scan_threshold, tolerances, prune_threshold, category_stats, match,
 )
     println("categorizing...")
     categorized_segments = for k in keys(segments.segment_means)
         mn = segments.segment_means[k]
         ctg = mn.category 
         if ctg == 0 
-            ctg = _categorize(mn, category_stats, tolerances, pixelprops)
+            ctg = _categorize(mn, category_stats, tolerances, match)
             segments.segment_means[k] = PixelProp(mn.color, mn.std, mn.stripe, ctg)
         end
     end
@@ -72,17 +72,17 @@ function _categorize!(pixels::AbstractArray, segments, points;
     return category_ints
 end
 # Categorize a pixel
-function _categorize(x, categories, tolerances, pixelprops=Val{(:color,:std,:stripe)}())
+function _categorize(x, categories, tolerances, match=Val{(:color,:std,:stripe)}())
     errs = map(categories) do cat
-        ismissing(cat) ? typemax(Float64) : _category_error(x, cat, pixelprops)
+        ismissing(cat) ? typemax(Float64) : _category_error(x, cat, match)
     end
     _, best = findmin(errs)
-    return _isincategory(x, categories[best], tolerances[best], pixelprops) ? best : 0
+    return _isincategory(x, categories[best], tolerances[best], match) ? best : 0
 end
 
 
-function _category_error(val::PixelProp, stats, pixelprops=Val{(:color,:std,:stripe)}())
-    sum(map(_category_error, _asnamedtuple(val)[_unwrap(pixelprops)], _asnamedtuple(stats)[_unwrap(pixelprops)]))
+function _category_error(val::PixelProp, stats, match=DEFAULT_MATCH)
+    sum(map(_category_error, _asnamedtuple(val)[_unwrap(match)], _asnamedtuple(stats)[_unwrap(match)]))
 end
 function _category_error(v::HSL, s)
     ((v.h - s.h.mean)/360)^2 + (v.s - s.s.mean)^2 + (v.l - s.l.mean)^2 
@@ -104,12 +104,12 @@ _meanval(x) = x
 
 function _isincategory(
     val::PixelProp, stats::NamedTuple{(:color,:std,:stripe,:category)},
-    tol, pixelprops::Val=Val{(:color,:std,:stripe)}()
+    tol, match::Val=DEFAULT_MATCH
 )
     if (val.category != 0) && (stats.category != 0)
         return stats.category == val.category 
     end
-    return all(map((v, s) -> _isincategory(v, s, tol), _asnamedtuple(val)[_unwrap(pixelprops)], stats[_unwrap(pixelprops)]))
+    return all(map((v, s) -> _isincategory(v, s, tol), _asnamedtuple(val)[_unwrap(match)], stats[_unwrap(match)]))
 end
 function _isincategory(val::RGBA, stats, tol)
     val.alpha == 0 && return false
@@ -156,3 +156,4 @@ _point_value(A::AbstractMatrix, P) = A[_point_index(P)...]
 _point_values(A::AbstractMatrix, pointvec::AbstractVector) = map(P -> _point_value(A, P), pointvec)
 
 _unwrap(::Val{X}) where X = X
+_unwrap(t::Tuple) = t

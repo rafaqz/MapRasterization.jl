@@ -26,7 +26,7 @@ function cross_layer_neighborhood(radius)
 end
 
 function _stripes(img; radius=3, hood=cross_layer_neighborhood(radius))
-    Neighborhoods.broadcast_neighborhood(hood, img; padval=(0.0, 0.0)) do hood, val
+    stripes = Neighborhoods.broadcast_neighborhood(hood, img; padval=(0.0, 0.0)) do hood, val
         (; h, s, l) = HSL(val)
         dirs = map(neighbors(hood)) do layer
             mean(layer) do n
@@ -35,6 +35,8 @@ function _stripes(img; radius=3, hood=cross_layer_neighborhood(radius))
         end
         (dirs.vert - dirs.horz), (dirs.angle45 - dirs.angle135)
     end
+    mx = max(maximum(abs ∘ first, stripes), maximum(abs ∘ last, stripes)) 
+    return broadcast(s -> s ./ mx, stripes)
 end
 
 function _mean_point_stripyness(A::AbstractMatrix, pointvecs::AbstractVector{<:AbstractVector})

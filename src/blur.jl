@@ -4,7 +4,7 @@ From: Fast Modified Vector Median Filter
 B. Smolka1, M. Szczepanski, K.N. Plataniotis, and A.N. Venetsanopoulos
 =#
 function blur(A, stds; hood=Window{1}(), threshold=0.25, repeat=1)
-    m = maximum(stds) * threshold
+    # m = maximum(stds) * threshold
     for _ in 1:repeat
         A = broadcast_neighborhood(hood, A) do h, v
             v.alpha == 0 ? v : _clean_mean(h, v)

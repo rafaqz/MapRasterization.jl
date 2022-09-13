@@ -1,17 +1,24 @@
 function _balance(A, points)
-    if length(points) < 8
+    # little_table = map(points, 1:length(points)) do pointvec, c
+        little_table = map(points[1]) do (i, j)
+            rgb = RGB(A[round(Int, i), round(Int, j)])
+            # (; map(Float64, (; r=rgb.r, g=rgb.g, b=rgb.b, i, j))..., c)
+            map(Float64, (; r=rgb.r, g=rgb.g, b=rgb.b, i, j))
+        end |> collect
+    # end |> Iterators.flatten |> collect
+    @assert little_table isa Vector{<:NamedTuple}
+    if length(little_table) < 8
         return A .* 1.0
     end
     big_table = map(CartesianIndices(A)) do I
         (i=I[1], j=I[2])
     end |> vec
-    little_table = map(points) do (i, j)
-        rgb = RGB(A[round(Int, i), round(Int, j)])
-        map(Float64, (; r=rgb.r, g=rgb.g, b=rgb.b, i, j))
-    end |> vec
-    model_r = lm(@formula(r ~ i + j), little_table)
-    model_g = lm(@formula(g ~ i + j), little_table)
-    model_b = lm(@formula(b ~ i + j), little_table)
+    # model_r = lm(@formula(r ~ i + j), little_table)
+    # model_g = lm(@formula(g ~ i + j), little_table)
+    # model_b = lm(@formula(b ~ i + j), little_table)
+    model_r = lm(@formula(r ~ i^2 + i + j^2 + j), little_table)
+    model_g = lm(@formula(g ~ i^2 + i + j^2 + j), little_table)
+    model_b = lm(@formula(b ~ i^2 + i + j^2 + j), little_table)
     pred_r = reshape(predict(model_r, big_table), size(A))
     pred_g = reshape(predict(model_g, big_table), size(A))
     pred_b = reshape(predict(model_b, big_table), size(A))
