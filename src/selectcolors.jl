@@ -21,13 +21,12 @@ function selectcolors(raw_map::AbstractArray{C};
     stripe_radius=5,
     line_threshold=1.0,
     blur_repeat=1,
-    clean_repeat=0,
-    line_tolerance=2.0,
+    clean_repeat=1,
     category_tolerances=[2.0 for _ in 1:ncategories],
+    line_tolerance=0,
     kw...
 ) where C
     match_obs = Observable{Val}(Val{(map(Symbol, match)...,)}())
-    prune_threshold=0
     ncategories = length(points)
     nremovals = length(removals)
 
@@ -36,7 +35,7 @@ function selectcolors(raw_map::AbstractArray{C};
     balanced_map = Observable(_balance(raw_map, points))
     known_category_map = Observable(_set_categories!(zeros(Int, size(raw_map)), points))
     line_removed_map = Observable(_remove_lines(balanced_map[], removals;
-        radius=stripe_radius, threshold=line_threshold, tolerance=line_tolerance,
+        radius=stripe_radius, threshold=line_threshold,
     ))
     blurred_map = Observable(
         blur(line_removed_map[], std_map; 
@@ -44,19 +43,26 @@ function selectcolors(raw_map::AbstractArray{C};
         )
     )
     stripe_map = Observable(_stripes(blurred_map[], radius=stripe_radius))
-    segments = Observable{Any}(fast_scanning(PixelProp.(blurred_map[], std_map, stripe_map[], known_category_map[]), scan_threshold; match=match_obs[]))
+    segments = Observable(fast_scanning(PixelProp.(blurred_map[], std_map, stripe_map[], known_category_map[]), scan_threshold; match=match_obs[]))
     pruned = Observable{Any}(_maybe_prune(segments[], prune_threshold))
     segmented_map = Observable(map(i -> IS.segment_mean(pruned[], i), IS.labels_map(pruned[])))
-    rgba_segmented_map = Observable(RGBA.(segmented_map[]) .* 1.0)
-
     categorized_map = Observable(similar(raw_map, Int))
     cleaned_map = Observable(similar(raw_map, Int))
+    rgba_segmented_map = Observable(RGBA.(segmented_map[]) .* 1.0)
+    rgba_categorized_map = Observable(similar(raw_map, RGBA{Float64}))
+    rgba_cleaned_map = Observable(similar(raw_map, RGBA{Float64}))
 
     on(segmented_map) do sm
-        A = RGBA.(sm) .* 1.0
-        @show typeof(A)
-        rgba_segmented_map[] = A
+        rgba_segmented_map[] = RGBA.(sm) .* 1.0
         notify(rgba_segmented_map)
+    end
+    onany(categorized_map, balanced_map) do cm, bm
+        rgba_categorized_map[] = _recolor(cm, bm, map(getindex, points_obs))
+        notify(rgba_categorized_map)
+    end
+    onany(cleaned_map, balanced_map) do cm, bm
+        rgba_cleaned_map[] = _recolor(cm, bm, map(getindex, points_obs))
+        notify(rgba_cleaned_map)
     end
 
     # Figure
@@ -87,23 +93,19 @@ function selectcolors(raw_map::AbstractArray{C};
     line_threshold_slider = line_threshold_labelled.slider
     slidergrid[1, 1] = line_threshold_labelled.layout
 
-    line_tolerance_labelled = labelslider!(fig, "line tolerance", 0.0:0.01:20.0; sliderkw=(; startvalue=line_tolerance))
-    slidergrid[2, 1] = line_tolerance_labelled.layout
-    line_tolerance_slider = line_tolerance_labelled.slider
-
     blur_repeat_labelled = labelslider!(fig, "blur iterations", 0:20; sliderkw=(; startvalue=blur_repeat))
-    slidergrid[3, 1] = blur_repeat_labelled.layout
+    slidergrid[2, 1] = blur_repeat_labelled.layout
     blur_repeat_slider = blur_repeat_labelled.slider
 
     scan_threshold_labelled = labelslider!(fig, "scan threshold", _aslog(0.00001:0.0001:0.1); sliderkw=(; startvalue=scan_threshold))
-    slidergrid[4, 1] = scan_threshold_labelled.layout
+    slidergrid[3, 1] = scan_threshold_labelled.layout
     scan_threshold_slider = scan_threshold_labelled.slider
 
-    prune_labelled = labelslider!(fig, "prune threshold", 0:500; startvalue=prune_threshold)
-    prune_slider = prune_labelled.slider
-    slidergrid[5, 1] = prune_labelled.layout
+#     prune_labelled = labelslider!(fig, "prune threshold", 0:500; startvalue=prune_threshold)
+#     prune_slider = prune_labelled.slider
+#     slidergrid[4, 1] = prune_labelled.layout
 
-    clean_labelled = labelslider!(fig, "cleaning iterations", 0:20; startvalue=clean_repeat)
+    clean_labelled = labelslider!(fig, "cleaning iterations", 0:20; sliderkw=(; startvalue=clean_repeat))
     clean_slider = clean_labelled.slider
     slidergrid[6, 1] = clean_labelled.layout
 
@@ -126,6 +128,9 @@ function selectcolors(raw_map::AbstractArray{C};
     category_tolerance_sliders = color_grid[2, 1:ncategories] = map(category_tolerances) do t
         Slider(fig; startvalue=t, range=-2.0:0.01:20.0, height=100, width=30, horizontal=false)
     end
+    category_keep_toggles = color_grid[3, 1:ncategories] = map(category_tolerances) do _
+        Toggle(fig; active=true)
+    end
 
     # Images
     fig[2, 1] = plotgrid = GridLayout(tellwidth = false)
@@ -142,8 +147,10 @@ function selectcolors(raw_map::AbstractArray{C};
     heatmap!(ax2, line_removed_map)
     heatmap!(ax3, blurred_map)
     heatmap!(ax4, rgba_segmented_map)
-    heatmap!(ax5, categorized_map; colormap=:thermal, colorrange=(0, ncategories))
-    heatmap!(ax6, cleaned_map; colormap=:thermal, colorrange=(0, ncategories))
+    # heatmap!(ax5, categorized_map; colormap=:thermal, colorrange=(0, ncategories))
+    # heatmap!(ax6, cleaned_map; colormap=:thermal, colorrange=(0, ncategories))
+    heatmap!(ax5, rgba_categorized_map)
+    heatmap!(ax6, rgba_cleaned_map)
 
     map(toggles) do toggle
         on(toggle.active) do _
@@ -167,15 +174,17 @@ function selectcolors(raw_map::AbstractArray{C};
 
     # Button inputs
     on(balance_btn.clicks) do _
-        balanced_map[] = _balance(raw_map, map(getindex, points_obs))
-        notify(balanced_map)
+        @async begin
+            balanced_map[] = _balance(raw_map, map(getindex, points_obs))
+            notify(balanced_map)
+        end
     end
     on(remove_lines_btn.clicks) do _
         line_removed_map[] = _remove_lines(balanced_map[], map(getindex, points_obs[ncategories+1:end]);
             stds=std_map,
             radius=stripe_radius,
             threshold=line_threshold_slider.value[],
-            tolerance=line_tolerance_slider.value[],
+            # tolerance=line_tolerance_slider.value[],
         )
         notify(line_removed_map)
     end
@@ -187,32 +196,38 @@ function selectcolors(raw_map::AbstractArray{C};
         notify(blurred_map)
     end
     onany(scan_btn.clicks) do _
-        scan_threshold = scan_threshold_slider.value[]
-        bm = blurred_map[]
-        println("scanning...")
-        stripe_map[] = _stripes(blurred_map[], radius=stripe_radius)
-        segments[] = fast_scanning(PixelProp.(bm, std_map, stripe_map[], known_category_map[]), scan_threshold; match=match_obs[])
-        println("plotting...")
-        segmented_map[] = map(i -> IS.segment_mean(segments[], i), IS.labels_map(segments[]))
-        notify(segmented_map)
+        @async begin
+            scan_threshold = scan_threshold_slider.value[]
+            bm = blurred_map[]
+            println("scanning...")
+            stripe_map[] = _stripes(blurred_map[], radius=stripe_radius)
+            segments[] = fast_scanning(PixelProp.(bm, std_map, stripe_map[], known_category_map[]), scan_threshold; match=match_obs[])
+            println("plotting...")
+            segmented_map[] = map(i -> IS.segment_mean(segments[], i), IS.labels_map(segments[]))
+            notify(segmented_map)
+        end
     end
     on(categorize_btn.clicks) do _
-        points = map(getindex, points_obs[1:ncategories])
-        if any(p -> length(p) > 0, points)
-            categorized_map[] = _categorize(
-                segmented_map[], segments[], points;
-                scan_threshold=scan_threshold_slider.value[],
-                category_tolerances=map(t -> t.value[], category_tolerance_sliders),
-                prune_threshold=prune_slider.value[],
-                match=match_obs[],
-            )
-            notify(categorized_map)
+        @async begin
+            points = map(getindex, points_obs[1:ncategories])
+            if any(p -> length(p) > 0, points)
+                categorized_map[] = _categorize(
+                    segmented_map[], segments[], points;
+                    scan_threshold=scan_threshold_slider.value[],
+                    category_tolerances=map(t -> t.value[], category_tolerance_sliders),
+                    prune_threshold=0,#prune_slider.value[],
+                    match=match_obs[],
+                )
+                notify(categorized_map)
+            end
         end
     end
     on(clean_btn.clicks) do _
         cleaned_map[] = _clean(categorized_map[];
+            points=map(getindex, points_obs),
             ncategories = ncategories,
-            repeat=clean_slider.value[]
+            repeat=clean_slider.value[],
+            keep=map(t -> t.active[], category_keep_toggles),
         )
         notify(cleaned_map)
     end
@@ -258,7 +273,7 @@ function selectcolors(raw_map::AbstractArray{C};
     end
 
     map(axes_) do ax
-        dragselect!(fig, ax, points_obs, size(raw_map); section, kw...)
+        dragselect!(fig, ax, points_obs, size(raw_map); section)#, kw...)
     end
 
     # Wait
@@ -271,15 +286,23 @@ function selectcolors(raw_map::AbstractArray{C};
     points = map(getindex, points_obs[1:ncategories])
     settings = (
         scan_threshold=scan_threshold_slider.value[],
-        prune_threshold=prune_slider.value[],
+        prune_threshold=0,#prune_slider.value[],
         line_threshold=line_threshold_slider.value[],
-        line_tolerance=line_tolerance_slider.value[],
+        # line_tolerance=line_tolerance_slider.value[],
         blur_repeat=blur_repeat_slider.value[],
         category_tolerances=map(t -> t.value[], category_tolerance_sliders),
+        clean_repeat=clean_slider.value[],
         match=_unwrap(match_obs[]),
     )
 
     return MapSelection(settings, removals, points, cleaned_map[])
+end
+
+function _recolor(categories, source, points)
+    colors = map(ps -> _mean_color(source, ps), points)
+    map(categories) do cat
+        cat == 0 ? RGBA(RGB(0), 0) : RGBA(colors[cat]) 
+    end
 end
 
 function _bools_from_match(xs)
@@ -317,10 +340,17 @@ function _categorize(A::AbstractArray, segments, points::Vector;
     )
 end
 
-function _clean(values::AbstractArray{Int}; repeat=5, ncategories, categories=ntuple(identity, ncategories))
-    @show repeat categories
+function _clean(values::AbstractArray{Int}; keep, points, repeat=5, ncategories, categories=Tuple(i for i in 1:ncategories if keep[i]))
+    known = zeros(Int, size(values))
+    foreach(enumerate(points)) do (category, pointvec)
+        map(pointvec) do P
+            I = _point_index(P)
+            known[I...] = category
+        end
+    end
     for i in 1:repeat
         values = clean_categories(values;
+            known,
             categories,
             keep_neigborless=false,
             missingval=0,

@@ -1,26 +1,47 @@
 
 function clean_categories(src::AbstractArray;
+    known,
     categories=(),
     neighborhood=Moore{2,2}(),
     keep_neigborless=false,
     missingval=missing,
     despecle=true,
 )
+    @show sum(src)
     # if despecle
-        src = broadcast_neighborhood(Moore{1,2}(), src) do hood, v
-            catcounts = _countcats(hood, categories)
+        src = broadcast_neighborhood(Moore{2,2}(), src, known) do hood, v, kn
+            (kn != missingval && kn in categories) && return kn
+            # If neighbors are missingval, return missingval
+            missingcount = count(==(missingval), hood)
+            matchcount = count(==(v), hood)
             if !isequal(v, missingval) && v in categories
-                if (count(==(v), skipmissing(hood)) > 2)
+                if matchcount > 10
                     return v
+                elseif missingcount > 18
+                    return missingval
                 else
+                    catcounts = _countcats(hood, categories)
                     if any(>(0), catcounts)
-                        return categories[findmax(catcounts)[2]]
+                        n, i = findmax(catcounts)
+                        if n > missingcount - 5
+                            return missingval
+                        else
+                            return categories[findmax(catcounts)[2]]
+                        end
                     else
                         return missingval
                     end
                 end
+            elseif v == missingval
+                if missingcount > (length(hood) - 2)
+                    return missingval
+                else
+                    catcounts = _countcats(hood, categories)
+                    n, i = findmax(catcounts)
+                    return categories[i]
+                end
             else
-                return categories[findmax(catcounts)[2]]
+                missingval
             end
         end
     # end

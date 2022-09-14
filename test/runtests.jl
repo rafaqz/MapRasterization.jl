@@ -32,21 +32,45 @@ end
 
 # Makie.heatmap(img)
 selected_dir = "/home/raf/PhD/Mascarenes/Data/Selected"
+
 img_path = joinpath(selected_dir, "Mauritius/Undigitised/3.jpg")
 img_path = joinpath(selected_dir, "Mauritius/Undigitised/13.jpg")
 img_path = joinpath(selected_dir, "Mauritius/Undigitised/6.jpg")
 img_path = joinpath(selected_dir, "Mauritius/Undigitised/49.jpg")
 img_path = joinpath(selected_dir, "Mauritius/Undigitised/50.jpg")
 img_path = joinpath(selected_dir, "Mauritius/Undigitised/52.jpg")
+
 img = load(img_path) |> rotr90
-
-output = MapRasterization.selectcolors(img; ncategories=4)
-output = MapRasterization.selectcolors(img, output)
 json_path = splitext(img_path)[1] * ".json"
+if isfile(json_path)
+    output = JSON3.read(read(json_path), MapRasterization.MapSelection)
+    output = MapRasterization.selectcolors(img, output)
+else
+    output = MapRasterization.selectcolors(img; ncategories=15)
+end
 write(json_path, JSON3.write(output))
-output = JSON3.read(read(json_path), MapRasterization.MapSelection)
 
-MapRasterization._balance(img, output.points)
+img_paths = map(s -> joinpath(selected_dir, s), (
+    "Mauritius/Undigitised/3.jpg",
+    "Mauritius/Undigitised/13.jpg",
+    "Mauritius/Undigitised/6.jpg",
+    "Mauritius/Undigitised/49.jpg",
+    "Mauritius/Undigitised/50.jpg",
+    "Mauritius/Undigitised/52.jpg"
+))
+
+for img_path in img_paths
+    img = load(img_path) |> rotr90
+    json_path = splitext(img_path)[1] * ".json"
+    if isfile(json_path)
+        output = JSON3.read(read(json_path), MapRasterization.MapSelection)
+        output = MapRasterization.selectcolors(img, output)
+    else
+    output = MapRasterization.selectcolors(img; ncategories=15)
+    # end
+    write(json_path, JSON3.write(output))
+    sleep(2)
+end
 
 using ImageSegmentation, FileIO
 using ImageFiltering
