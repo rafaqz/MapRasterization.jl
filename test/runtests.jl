@@ -33,12 +33,23 @@ end
 # Makie.heatmap(img)
 selected_dir = "/home/raf/PhD/Mascarenes/Data/Selected"
 
+img_path = joinpath(selected_dir, "Mauritius/Undigitised/2.jpg")
 img_path = joinpath(selected_dir, "Mauritius/Undigitised/3.jpg")
+img_path = joinpath(selected_dir, "Mauritius/Undigitised/9.jpg")
 img_path = joinpath(selected_dir, "Mauritius/Undigitised/13.jpg")
 img_path = joinpath(selected_dir, "Mauritius/Undigitised/6.jpg")
 img_path = joinpath(selected_dir, "Mauritius/Undigitised/49.jpg")
 img_path = joinpath(selected_dir, "Mauritius/Undigitised/50.jpg")
 img_path = joinpath(selected_dir, "Mauritius/Undigitised/52.jpg")
+
+img_path = joinpath(selected_dir, "Reunion/Undigitised/5.jpg")
+img_path = joinpath(selected_dir, "Reunion/Undigitised/6.jpg")
+img_path = joinpath(selected_dir, "Reunion/Undigitised/9.jpg")
+img_path = joinpath(selected_dir, "Reunion/Undigitised/12a.jpg")
+img_path = joinpath(selected_dir, "Reunion/Undigitised/12b.jpg")
+img_path = joinpath(selected_dir, "Reunion/Undigitised/14_cropped.jpg")
+img_path = joinpath(selected_dir, "Reunion/Undigitised/15.jpg")
+img_path = "/home/raf/PhD/Example data/Economic map/Indata/econ_a.tiff"
 
 img = load(img_path) |> rotr90
 json_path = splitext(img_path)[1] * ".json"
@@ -46,9 +57,11 @@ if isfile(json_path)
     output = JSON3.read(read(json_path), MapRasterization.MapSelection)
     output = MapRasterization.selectcolors(img, output)
 else
-    output = MapRasterization.selectcolors(img; ncategories=15)
+    output = MapRasterization.selectcolors(img; ncategories=5)
 end
 write(json_path, JSON3.write(output))
+push!(output.points, eltype(output.points)[])
+push!(output.settings.category_tolerances, 5.0)
 
 img_paths = map(s -> joinpath(selected_dir, s), (
     "Mauritius/Undigitised/3.jpg",

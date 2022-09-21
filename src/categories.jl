@@ -43,31 +43,24 @@ end
 
 # Categorize an array of pixels
 function _categorize!(pixels::AbstractArray, segments, points;
-    scan_threshold, tolerances, prune_threshold, category_stats, match,
+    tolerances, line_threshold=0.1, category_stats, match,
 )
-    println("categorizing...")
-    categorized_segments = for k in keys(segments.segment_means)
-        mn = segments.segment_means[k]
-        ctg = mn.category 
-        if ctg == 0 
-            ctg = _categorize(mn, category_stats, tolerances, match)
-            segments.segment_means[k] = PixelProp(mn.color, mn.std, mn.stripe, ctg)
-        end
-    end
-    println("post-pruning...")
-    if prune_threshold > 0
-        segments = IS.prune_segments(segments, 
-            i -> (IS.segment_mean(segments, i).category != 0 && IS.segment_pixel_count(segments, i) < prune_threshold), 
-            (i, j) -> if (IS.segment_mean(segments, j).category == 0 || IS.segment_mean(segments, j).category == IS.segment_mean(segments, i).category) 
-                (-IS.segment_pixel_count(segments, j)) 
-            else
-                typemax(Int)
-            end
-        )
-    end
-    println("creating output...")
-    category_ints = map(enumerate(pixels)) do (i, pix)
-        segments.segment_means[segments.image_indexmap[i]].category
+    # println("categorizing...")
+    # categorized_segments = for k in keys(segments.segment_means)
+    #     mn = segments.segment_means[k]
+    #     ctg = mn.category 
+    #     if ctg == 0 
+    #         ctg = _categorize(mn, category_stats, tolerances, match)
+    #         segments.segment_means[k] = PixelProp(mn.color, mn.std, mn.stripe, ctg)
+    #     end
+    # end
+    # println("creating output...")
+    # category_ints = map(enumerate(pixels)) do (i, pix)
+        # segments.segment_means[segments.image_indexmap[i]].category
+    # end
+    category_ints = map(pixels) do pix
+        ctg = pix.category 
+        ctg == 0 ? _categorize(pix, category_stats, tolerances, match) : ctg
     end
     return category_ints
 end

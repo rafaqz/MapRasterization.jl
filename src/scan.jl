@@ -1,6 +1,6 @@
 const DEFAULT_MATCH = Val{(:color,:std,:stripe)}()
 
-struct PixelProp{C<:Colorant,SD<:Real,SP<:Tuple{Real,Real}}
+struct PixelProp{C,SD<:Real,SP<:Tuple{Real,Real}}
     color::C
     std::SD
     stripe::SP
@@ -34,9 +34,9 @@ Base.oneunit(::Type{<:PixelProp{C,SD,Tuple{SP,SP}}}) where {C,SD,SP} =
 Base.one(::Type{<:PixelProp{C,SD,Tuple{SP,SP}}}) where {C,SD,SP} =
     PixelProp(one(C), one(SD), (one(SP), one(SP)), 0)
 Base.convert(::Type{<:PixelProp{C,SD,Tuple{SP,SP}}}, p::PixelProp) where {C,SD,SP} =
-    PixelProp(C(p.color), SD(p.std), (SP(p.stripe[1]), SP(p.stripe[2])), p.category) 
+    PixelProp(C(p.color), SD(p.std), (SP(p.stripe[1]), SP(p.stripe[2])), p.category)
 Base.convert(::Type{<:PixelProp{C}}, p::PixelProp) where {C,SD,SP} = PixelProp(C(p.color), p.std, p.stripe, p.category) 
-Base.convert(::Type{C}, p::PixelProp) where {C<:Colors.Colorant} = Base.convert(C, p.color)
+Base.convert(::Type{T}, p::PixelProp) where T = Base.convert(T, p.color)
 
 IS.accum_type(::Type{P}) where P <: PixelProp{C,SD,SP} where {C,SD,SP} = PixelProp{IS.accum_type(C),SD,SP}
 
@@ -68,6 +68,7 @@ function fast_scanning!(result, img::AbstractArray{CT,N}, threshold::Union{Abstr
     TM = meantype(CT)
     region_means        =   Dict{Int, TM}()                                 # A map conatining (label, mean) pairs
     region_pix_count    =   Dict{Int, Int}()                                # A map conatining (label, count) pairs
+    region_bbox         =   Dict{Int, Tuple{CartesianIndex,CartesianIndex}}() # 
     temp_labels         =   IS.IntDisjointSets(0)                           # Disjoint set to map labels to their equivalence class
     v_neigh             =   IS.MVector{N,Int}(undef)                        # MVector to store valid neighbours
     ctg_neigh           =   IS.MVector{N,Int}(undef)                        # MVector to store valid neighbours
@@ -102,12 +103,14 @@ function fast_scanning!(result, img::AbstractArray{CT,N}, threshold::Union{Abstr
             result[point] = new_label
             region_means[new_label] = img[point]
             region_pix_count[new_label] = 1
+            region_bbox[new_label] = (point, point)
 
         # If all labels are same
         elseif same_label && _canmerge(ctg, region_means[prev_label].category)
             result[point] = prev_label
             region_pix_count[prev_label] += 1
             region_means[prev_label] += (img[point] - region_means[prev_label])/(region_pix_count[prev_label])
+            region_bbox[prev_label] = _merge_bbox(region_bbox[prev_label], point)
         # All the same category or uncategorized
         elseif all(map(i -> _canmerge(ctg, ctg_neigh[i]), 1:sz)) && (sz < 2 || _canmerge(ctg_neigh[1], ctg_neigh[2]))
             # Merge segments and assign to this new label
@@ -118,15 +121,18 @@ function fast_scanning!(result, img::AbstractArray{CT,N}, threshold::Union{Abstr
             result[point] = union_label
             region_pix_count[union_label] += 1
             region_means[union_label] += (img[point] - region_means[union_label])/(region_pix_count[union_label])
+            region_bbox[union_label] = _merge_bbox(region_bbox[union_label], point)
 
             for i in 1:sz
                 if v_neigh[i] != union_label && haskey(region_pix_count, v_neigh[i])
                     region_pix_count[union_label] += region_pix_count[v_neigh[i]]
                     region_means[union_label] += (region_means[v_neigh[i]] - region_means[union_label])*region_pix_count[v_neigh[i]]/region_pix_count[union_label]
+                    region_bbox[union_label] = _merge_bbox(region_bbox[v_neigh[i]], region_bbox[union_label])
 
                     # Remove label v_neigh[i] from region_means, region_pix_count
                     delete!(region_pix_count,v_neigh[i])
                     delete!(region_means,v_neigh[i])
+                    delete!(region_bbox,v_neigh[i])
                 end
             end
         # elseif ctg == 0 
@@ -141,6 +147,7 @@ function fast_scanning!(result, img::AbstractArray{CT,N}, threshold::Union{Abstr
             result[point] = new_label
             region_means[new_label] = img[point]
             region_pix_count[new_label] = 1
+            region_bbox[new_label] = (point, point)
         end
     end
 
@@ -148,7 +155,15 @@ function fast_scanning!(result, img::AbstractArray{CT,N}, threshold::Union{Abstr
         result[point] = IS.find_root!(temp_labels, result[point])
     end
 
-    IS.SegmentedImage(result, unique(temp_labels.parents), region_means, region_pix_count)
+    IS.SegmentedImage(result, unique(temp_labels.parents), region_means, region_pix_count, region_bbox)
+end
+
+function _merge_bbox(a::Tuple{CartesianIndex,CartesianIndex}, b::Tuple{CartesianIndex,CartesianIndex})
+    min(a..., b...), max(a..., b...)
+end
+
+function _merge_bbox(a::Tuple{CartesianIndex,CartesianIndex}, b::CartesianIndex)
+    min(a..., b), max(a..., b)
 end
 
 _canmerge(a, b) = (a == 0) | (b == 0) | (a == b)

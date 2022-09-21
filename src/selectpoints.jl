@@ -196,8 +196,8 @@ function points2table(pointvecs::NamedTuple{Keys}) where Keys
     return merge.(pointvecs...)
 end
 
-table2points(A::AbstractArray{Point2}; keys=nothing) = A
 table2points(A::AbstractArray{Point2}; keys=nothing) = _table2points(A, keys)
+table2points(A::AbstractArray{Point2}, ::Nothing) = A
 function _table2points(table, keys::NTuple{4})
     knownpoints = Point2{Float32}.(collect(zip(Tables.getcolumn(table, keys[1]), Tables.getcolumn(table, keys[2]))))
     unknownpoints = Point2{Float32}.(collect(zip(Tables.getcolumn(table, keys[3]), Tables.getcolumn(table, keys[4]))))
