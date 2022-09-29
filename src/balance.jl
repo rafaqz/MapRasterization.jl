@@ -1,11 +1,14 @@
-function _balance(A, points)
-    # little_table = map(points, 1:length(points)) do pointvec, c
-        little_table = map(points[1]) do (i, j)
-            rgb = RGB(A[round(Int, i), round(Int, j)])
-            # (; map(Float64, (; r=rgb.r, g=rgb.g, b=rgb.b, i, j))..., c)
+function _balance(A, points; category_bitindex)
+    little_table = map(points[category_bitindex]) do pointvec
+        category_colors = map(pointvec) do (i, j)
+            RGB(A[round(Int, i), round(Int, j)])
+        end
+        category_mean_color = mean(category_colors)
+        map(category_colors, pointvec) do c, (i, j)
+            rgb = c - category_mean_color
             map(Float64, (; r=rgb.r, g=rgb.g, b=rgb.b, i, j))
-        end |> collect
-    # end |> Iterators.flatten |> collect
+        end
+    end |> Iterators.flatten |> collect
     @assert little_table isa Vector{<:NamedTuple}
     if length(little_table) < 8
         return A .* 1.0
@@ -13,22 +16,21 @@ function _balance(A, points)
     big_table = map(CartesianIndices(A)) do I
         (i=I[1], j=I[2])
     end |> vec
-    # model_r = lm(@formula(r ~ i + j), little_table)
-    # model_g = lm(@formula(g ~ i + j), little_table)
-    # model_b = lm(@formula(b ~ i + j), little_table)
-    model_r = lm(@formula(r ~ i^2 + i + j^2 + j), little_table)
-    model_g = lm(@formula(g ~ i^2 + i + j^2 + j), little_table)
-    model_b = lm(@formula(b ~ i^2 + i + j^2 + j), little_table)
-    pred_r = reshape(predict(model_r, big_table), size(A))
-    pred_g = reshape(predict(model_g, big_table), size(A))
-    pred_b = reshape(predict(model_b, big_table), size(A))
-    mean_r = mean(pred_r)
-    mean_g = mean(pred_g)
-    mean_b = mean(pred_b)
-    balanced_map = broadcast(A, pred_r, pred_g, pred_b) do p, r, g, b 
-        p1 = RGB(p)
-        means = (p1.r-r+mean_r, p1.g-g+mean_g, p1.b-b+mean_b)
-        RGB(map(x -> min(1, max(x, 0)), means)...) .* 1.0
+    models = (
+        r=lm(@formula(r ~ i^3 + i^2 + i + j^3 + j^2 + j), little_table),
+        g=lm(@formula(g ~ i^3 + i^2 + i + j^3 + j^2 + j), little_table),
+        b=lm(@formula(b ~ i^3 + i^2 + i + j^3 + j^2 + j), little_table),
+    )
+    predictions = map(models) do model
+        reshape(predict(model, big_table), size(A))
+    end
+    means = map(mean, predictions)
+    balanced_map = broadcast(A, predictions...) do x, p_r, p_g, p_b 
+        x1 = RGB(x)
+        # Subtract the prediction from each pixel, and add the mean
+        result = (x1.r-p_r+means.r, x1.g-p_g+means.g, x1.b-p_b+means.b)
+        # Clamp and convert to Float64
+        RGB(map(c -> min(1, max(c, 0)), result)...) .* 1.0
     end
     return balanced_map
 end

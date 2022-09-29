@@ -1,5 +1,5 @@
 
-function clean_categories(src::AbstractArray;
+function fill_gaps(src::AbstractArray;
     known,
     categories=(),
     neighborhood=Moore{2,2}(),
@@ -7,30 +7,30 @@ function clean_categories(src::AbstractArray;
     missingval=missing,
     despecle=true,
 )
-    @show sum(src)
-        src = broadcast_neighborhood(Moore{1,2}(), src, known) do hood, v, kn
-            kn != missingval && kn in categories && return kn
-            (count(==(v), hood) > 2) ? v : missingval
-        end
+        # src = broadcast_neighborhood(Moore{1,2}(), src, known) do hood, v, kn
+            # kn != missingval && kn in categories && return kn
+            # (count(==(v), hood) > 2) ? v : missingval
+        # end
         src = broadcast_neighborhood(Moore{2,2}(), src, known) do hood, v, kn
             kn != missingval && kn in categories && return kn
             # If neighbors are missingval, return missingval
             missingcount = count(==(missingval), hood)
             matchcount = count(==(v), hood)
             if !isequal(v, missingval) && v in categories
-                if matchcount > 7
-                    return v
-                elseif missingcount > 18
-                    return missingval
-                else
-                    catcounts = _countcats(hood, categories)
-                    n, i = findmax(catcounts)
-                    if n > missingcount - 5
-                        return categories[findmax(catcounts)[2]]
-                    else
-                        return missingval
-                    end
-                end
+                return v
+                # if matchcount > 7
+                    # return v
+                # elseif missingcount > 18
+                    # return missingval
+                # else
+                    # catcounts = _countcats(hood, categories)
+                    # n, i = findmax(catcounts)
+                    # if n > missingcount - 5
+                        # return categories[findmax(catcounts)[2]]
+                    # else
+                        # return missingval
+                    # end
+                # end
             elseif v == missingval
                 if missingcount > 18
                     return missingval
@@ -76,7 +76,7 @@ end
 const sm = IS.segment_mean
 const spc = IS.segment_pixel_count
 
-function _remove_lines(A, known_categories; line_threshold=0.01, prune_threshold=20, kw...)
+function _remove_lines(A, known_categories; categories, line_threshold=0.01, prune_threshold=20, kw...)
     pick_neighbor(i, j) = sm(segments, j).color == 0 ? typemax(Int) : -spc(segments, j)
     pick_cell(i) = (sm(segments, i).color != 0 && spc(segments, i) < prune_threshold)
     scan_threshold = 0.000000001
@@ -87,18 +87,25 @@ function _remove_lines(A, known_categories; line_threshold=0.01, prune_threshold
         region = CartesianIndices(bbox[2] - bbox[1] + CartesianIndex(1, 1))
         area = length(region)
         ratio = count / area 
-        if (count < prune_threshold) || (ratio < line_threshold)
-            meanpixel = segments.segment_means[label]
-            # if meanpixel.category == 0
+        meanpixel = segments.segment_means[label]
+        if !(meanpixel.color in categories)
+            segments.segment_means[label] = PixelProp(zero(meanpixel.color), meanpixel.std, meanpixel.stripe, 0)
+        elseif (count < prune_threshold) || (ratio < line_threshold)
+            if meanpixel.category == 0
                 segments.segment_means[label] = PixelProp(zero(meanpixel.color), meanpixel.std, meanpixel.stripe, 0)
-            # end
+            elseif !(meanpixel.color in (0, meanpixel.category))
+                # Check if any segment has the wrong category, and change it
+                # This allows forcing areas into the right category without
+                # using segment mode to categorize.
+                c = meanpixel.category
+                fixedpixel = PixelProp(c, meanpixel.std, meanpixel.stripe, c)
+                segments.segment_means[label] = fixedpixel
+            end
         end
     end
     
     # segments = IS.prune_segments(segments, pick_cell, pick_neighbor)
     return map(CartesianIndices(A)) do I
-        x = segments.segment_means[segments.image_indexmap[I]].color
-        # println(x)
-        x
+        segments.segment_means[segments.image_indexmap[I]].color
     end
 end

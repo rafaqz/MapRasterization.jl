@@ -42,25 +42,34 @@ function _meancolors(::Type{C}, categories) where C <: Colorant
 end
 
 # Categorize an array of pixels
-function _categorize!(pixels::AbstractArray, segments, points;
-    tolerances, line_threshold=0.1, category_stats, match,
+function _categorize(maps::NamedTuple, points; kw...)
+    pixels = PixelProp.(maps.blurred, maps.std, maps.stripe, maps.known_categories)
+    _categorize(pixels, points; kw...)
+end
+function _categorize(pixels::AbstractArray, points;
+    segmented=false, tolerances, scan_threshold=0.1, match,
 )
-    # println("categorizing...")
-    # categorized_segments = for k in keys(segments.segment_means)
-    #     mn = segments.segment_means[k]
-    #     ctg = mn.category 
-    #     if ctg == 0 
-    #         ctg = _categorize(mn, category_stats, tolerances, match)
-    #         segments.segment_means[k] = PixelProp(mn.color, mn.std, mn.stripe, ctg)
-    #     end
-    # end
-    # println("creating output...")
-    # category_ints = map(enumerate(pixels)) do (i, pix)
-        # segments.segment_means[segments.image_indexmap[i]].category
-    # end
-    category_ints = map(pixels) do pix
-        ctg = pix.category 
-        ctg == 0 ? _categorize(pix, category_stats, tolerances, match) : ctg
+    category_stats = collect(_component_stats(pixels, points))
+    if segmented
+        segments = fast_scanning(pixels, scan_threshold; match)
+        println("categorizing...")
+        categorized_segments = for k in keys(segments.segment_means)
+            mn = segments.segment_means[k]
+            ctg = mn.category 
+            if ctg == 0 
+                ctg = _categorize(mn, category_stats, tolerances, match)
+                segments.segment_means[k] = PixelProp(mn.color, mn.std, mn.stripe, ctg)
+            end
+        end
+        println("creating output...")
+        segmented_map = map(i -> IS.segment_mean(segments, i), IS.labels_map(segments))
+        category_ints = map(IS.labels_map(segments)) do i
+            IS.segment_mean(segments, i).category
+        end
+    else
+        category_ints = map(pixels) do pix
+            _categorize(pix, category_stats, tolerances, match)
+        end
     end
     return category_ints
 end
@@ -75,7 +84,7 @@ end
 
 
 function _category_error(val::PixelProp, stats, match=DEFAULT_MATCH)
-    sum(map(_category_error, _asnamedtuple(val)[_unwrap(match)], _asnamedtuple(stats)[_unwrap(match)]))
+    mean(map(_category_error, _asnamedtuple(val)[_unwrap(match)], _asnamedtuple(stats)[_unwrap(match)]))
 end
 function _category_error(v::HSL, s)
     ((v.h - s.h.mean)/360)^2 + (v.s - s.s.mean)^2 + (v.l - s.l.mean)^2 
@@ -86,7 +95,7 @@ function _category_error(val::Colorant, stats)
     end)
 end
 function _category_error(val::Tuple, stats::Tuple)
-    sum(map(val, stats) do v, s 
+    mean(map(val, stats) do v, s 
         (v - _meanval(s))^2
     end)
 end

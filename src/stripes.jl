@@ -1,11 +1,3 @@
-
-hood = LayeredPositional(
-    vert=Positional((-1, 0), (1, 0)),
-    horz=Positional((0, -1), (0, 1)),
-    angle45=Positional((-1, -1), (1, 1)),
-    angle135=Positional((-1, 1), (1, -1)),
-)
-
 function _pos(i, j, s)
     a = map(-s:-1) do x
         (i * x, j*x)
@@ -13,7 +5,7 @@ function _pos(i, j, s)
     b = map(1:s) do x
         (i * x, j*x)
     end
-    Positional(a..., b...)
+    LayeredPositional((a=Positional(a...), b=Positional(b...)))
 end
 
 function cross_layer_neighborhood(radius)
@@ -29,14 +21,17 @@ function _stripes(img; radius=3, hood=cross_layer_neighborhood(radius))
     stripes = Neighborhoods.broadcast_neighborhood(hood, img; padval=(0.0, 0.0)) do hood, val
         (; h, s, l) = HSL(val)
         dirs = map(neighbors(hood)) do layer
-            mean(layer) do n
-                (s - HSL(n).s)^2 + (l - HSL(n).l)^2
-            end
+            # Take the minimum of the mean stripiness of either side
+            map(layer) do side
+                mean(side) do n
+                    (s - HSL(n).s)^2 + (l - HSL(n).l)^2
+                end
+            end |> minimum
         end
         (dirs.vert - dirs.horz), (dirs.angle45 - dirs.angle135)
     end
-    mx = max(maximum(abs ∘ first, stripes), maximum(abs ∘ last, stripes)) 
-    return broadcast(s -> s ./ mx, stripes)
+    m = mean((mean(abs ∘ first, stripes), mean(abs ∘ last, stripes))) 
+    return map(s -> s ./ m, stripes)
 end
 
 function _mean_point_stripyness(A::AbstractMatrix, pointvecs::AbstractVector{<:AbstractVector})

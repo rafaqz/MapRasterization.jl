@@ -31,9 +31,22 @@ function manualinput(A::Raster; points=Point2{Float32}[], keys=nothing)
 end
 
 _get(positions, ::Nothing) = positions
-_get(positions, section) = positions[section[]]
+# Allow nesting
+_get(positions, section::Tuple{Vararg{Observable{Int}}}) = _get(positions, map(getindex, section))
+_get(positions, section::Tuple{Vararg{Int}}) = _get(_get(positions, first(section[1])), Base.tail(section))
+_get(positions, section::Tuple{}) = positions
+_get(positions, section::Observable) = _get(positions, section[])
+_get(positions, section::Int) = positions[section]
+_get(positions::Observable, section::Int) = positions[][section]
 
-function dragselect!(fig, ax, positions, pixelsize; 
+_getobs(positions, ::Nothing) = positions
+_getobs(positions, section::Tuple{Vararg{Observable{Int}}}) = _getobs(positions, first(section))
+_getobs(positions, section::Tuple{Vararg{Int}}) = positions[first(section)]
+_getobs(positions, section::Observable) = _getobs(positions, section[])
+_getobs(positions, section::Int) = positions[section]
+# _getobs(positions, section::Tuple{}) = positions
+
+function dragselect!(fig, ax, positions::Vector{<:Observable{<:Vector{<:Union{<:Point,<:Polygon},}}}, pixelsize; 
     selected=Ref(false), dragging=Ref(false), caninsert=false, section=nothing
 )
     selected[] = false
@@ -73,7 +86,7 @@ function dragselect!(fig, ax, positions, pixelsize;
                                     insert = true
                                     idx[] = i + 1
                                     insert!(_get(positions, section)[], i + 1, ipos)
-                                    notify(_get(positions, section))
+                                    notify(_getobs(positions, section))
                                     break
                                 end
                                 lastp = p
@@ -82,7 +95,7 @@ function dragselect!(fig, ax, positions, pixelsize;
                         if !insert
                             push!(_get(positions, section)[], ipos)
                             idx[] = lastindex(_get(positions, section)[])
-                            notify(_get(positions, section))
+                            notify(_getobs(positions, section))
                         end
                     end
                     dragging[] = true 
@@ -92,14 +105,14 @@ function dragselect!(fig, ax, positions, pixelsize;
                 end
             elseif event.action == Mouse.release
                 dragging[] = false
-                notify(_get(positions, section))
+                notify(_getobs(positions, section))
             end
         # Delete points with right click
         elseif event.button == Mouse.right
             if pos_px in ax.scene.px_area[]                    
                 pointnear(_get(positions, section)[], ipos, accuracy[]) do i
                     isnothing(i) || deleteat!(_get(positions, section)[], i)
-                    notify(_get(positions, section))
+                    notify(_getobs(positions, section))
                 end
             end
             selected[] = false
@@ -114,20 +127,10 @@ function dragselect!(fig, ax, positions, pixelsize;
             # Check for sync problems
             # if ipos in eachindex(positions[])
             _get(positions, section)[][idx[]] = ipos
-            notify(_get(positions, section))
+            notify(_getobs(positions, section))
             # end
             return Consume(true)
         end
-        return Consume(false)
-    end
-    on(events(fig).keyboardbutton) do event
-        if selected[] && event.action in (Keyboard.press, Keyboard.repeat)
-            event.key == Keyboard.right  && _move(_get(positions, section), idx[], (1, 0))
-            event.key == Keyboard.up     && _move(_get(positions, section), idx[], (0, 1))
-            event.key == Keyboard.left   && _move(_get(positions, section), idx[], (-1, 0))
-            event.key == Keyboard.down   && _move(_get(positions, section), idx[], (0, -1))
-        end
-        # Let the event reach other listeners
         return Consume(false)
     end
 end
@@ -206,3 +209,18 @@ end
 function _table2points(table, keys::NTuple{2})
     return Point2{Float32}.(collect(zip(Tables.getcolumn(table, keys[1]), Tables.getcolumn(table, keys[2]))))
 end
+
+function hover_report!(string_obs, fig, ax, sources, source_id)
+    on(events(fig).mouseposition, priority=2) do mp
+        pos_px = Makie.mouseposition_px(fig.scene)
+        if pos_px in ax.scene.px_area[]                    
+            A = sources[source_id[]][]
+            pos = Makie.mouseposition(ax.scene)
+            I = round.(Int, pos)
+            if checkbounds(Bool, A, I...)
+                string_obs[] = string(A[I...])
+            end
+        end
+    end
+end
+
