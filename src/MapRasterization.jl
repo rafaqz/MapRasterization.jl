@@ -16,6 +16,7 @@ using Statistics
 
 import Tables
 import ImageSegmentation as IS
+import GeoInterface as GI
 
 using DynamicGrids.Neighborhoods
 using Rasters.LookupArrays

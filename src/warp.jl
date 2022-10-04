@@ -1,23 +1,22 @@
-function manualwarp(As...; template::Raster, points=nothing, missingval=missing)
-    points = select_common_points(As; template, points, missingval)
-    applywarp(As...; template, points, missingval)
+function manualwarp(As...; points=nothing, kw...)
+    points = select_common_points(first(As); points, kw...)
+    applywarp(As...; points, kw...)
 end
 
-function applywarp(As::RasterStack; template, points=nothing, missingval=missing)
+function applywarp(As::RasterStack; template::Raster, kw...)
     As = map(A -> reorder(A, ForwardOrdered), As)
     template = reorder(template, ForwardOrdered)
-    warped = _warp_from_points(As, template, points, missingval)
+    warped = _warp_from_points(As, template; kw...)
     return warped
 end
-function applywarp(As...; template, points=nothing, missingval=missing)
+function applywarp(As...; template::Raster, kw...)
     A1 = first(As)
     if A1 isa Raster
         As = map(A -> reorder(A, ForwardOrdered), As)
     end
     template = reorder(template, ForwardOrdered)
-    warped = _warp_from_points(As, template, points, missingval)
+    warped = _warp_from_points(As, template; kw...)
     # Show updated heatmap
-    # display(Makie.heatmap(map(parent, dims(first(warped)))..., parent(first(warped))))
     if length(warped) == 1
         return first(warped)
     else
@@ -25,13 +24,13 @@ function applywarp(As...; template, points=nothing, missingval=missing)
     end
 end
 
-function _warp_from_points(As::RasterStack, template, points, missingval)
-    rasters = _warp_from_points(values(As), template, points, missingval)
+function _warp_from_points(As::RasterStack, template::Raster; kw...)
+    rasters = _warp_from_points(values(As), template; kw...)
     RasterStack(rasters)
 end
-function _warp_from_points(As::Tuple, template, points, missingval)
-    models = _fitlinearmodels(points)
-    return map(A -> linearwarp(A; template, models, missingval), As)
+function _warp_from_points(As::Tuple, template::Raster; points, poly=1, kw...)
+    models = _fitlinearmodels(points, poly)
+    return map(A -> linearwarp(A; template, models, poly, kw...), As)
 end
 
 
@@ -41,54 +40,67 @@ end
 Select points in an image and a spatial Raster
 in order to snap the image to the rasters coordinates.
 """
-select_common_points(A; template, kw...) = _select_common_points(A, template; kw...)
-
-_select_common_points(A, template::Raster; kw...) = 
-    _select_common_points(A, parent(reorder(template, ForwardOrdered)); kw...)
-_select_common_points(A::Raster, template; kw...) = 
-    _select_common_points(parent(reorder(A, ForwardOrdered)), template; kw...)
-_select_common_points(A::Raster, template::Raster; kw...) = 
-    _select_common_points(parent(reorder(A, ForwardOrdered)), template; kw...)
-function _select_common_points(A, template::AbstractArray; points=nothing, missingval)
-    # map(A -> size(A) == size(first(As)), As) || throw(ArgumentError("Intput raster sizes are not the same"))
+function select_common_points(A::AbstractArray; template::AbstractArray, 
+    points=nothing, keys=nothing, missingval=missing, kw...
+)
+    # Only works in GLMakie
+    # GLMakie.activate()
     fig = Figure()
     ax1 = Makie.Axis(fig[1,1]; title="Source raster with known crs/resolution - `template` kw")
     ax2 = Makie.Axis(fig[1,2]; title="First raster with unknown crs/resolution")
-    ax1.aspect = ax2.aspect = Makie.AxisAspect(1)
-    dragging1 = Ref(false)
-    dragging2 = Ref(false)
-    knownpoints, unknownpoints = if !isnothing(points) && Tables.rowcount(points) > 0
-        table2points(points)
-    else
-        Point2{Float32}[], Point2{Float32}[]
-    end
-    @show knownpoints unknownpoints
-    knownpoints = selectmultiple(parent(template), fig, ax1; dragging=dragging1, points=knownpoints)
-    unknownpoints = selectmultiple(parent(A), fig, ax2; dragging=dragging2, points=unknownpoints)
-    @show knownpoints unknownpoints
-    finallimits = Ref{Any}(nothing)
-    overlay = nothing
-    lift(knownpoints, unknownpoints) do k, u
-        (dragging1[] || dragging2[]) && return nothing # Dont update during drag
-        len = min(length(k), length(u))
-        (length(k) == length(u) && len >= 3) || return nothing
-        points = points2table((known=k[1:len], unknown=u[1:len]))
-        warped = linearwarp(A; template, points, missingval)
-        finallimits[] = ax1.finallimits
-        if !isnothing(overlay)
-            delete!(ax1, overlay)
-        end
-        overlay = _heatmap!(ax1, parent(warped); colormap=(:viridis, 0.2)) 
-        ax1.finallimits = finallimits[]
-        return nothing
-    end
     screen = display(fig)
+    knownpoints, unknownpoints = _select_common_points(A, template::AbstractArray; 
+        points, keys, missingval, fig, ax1, ax2, kw...
+    )
     println("Select points in rasters, then close the window")
     while screen.window_open[] 
         sleep(0.1)
     end
-    length(knownpoints[]) == length(unknownpoints[]) || error("Number of selected points must be the same for each raster")
+    length(knownpoints[]) == length(unknownpoints[]) || @warn "Number of selected points not same for each image"
+    l = min(length(knownpoints[]), length(unknownpoints[]))
     return points2table((known=knownpoints[], unknown=unknownpoints[]))
+end
+
+function _select_common_points(A::AbstractArray, template::AbstractArray; 
+    points=nothing, keys=nothing, missingval=missing, fig, ax1, ax2, poly=1, kw...
+)
+    if template isa Raster
+        template = reorder(template, Y=>ForwardOrdered)
+    end
+    dragging1 = Ref(false)
+    dragging2 = Ref(false)
+    knownpoints, unknownpoints = if !isnothing(points) && Tables.rowcount(points) > 0
+        table2points(points; keys)
+    else
+        Point2{Float32}[], Point2{Float32}[]
+    end
+    unknownpoints = selectmultiple(A, fig, ax1; dragging=dragging1, points=unknownpoints)
+    knownpoints = selectmultiple(template, fig, ax2; dragging=dragging2, points=knownpoints)
+    if A isa AbstractVector
+        # warped_vector_overlay = Observable{Any}(A)
+        # _plot!(ax2, warped_vector_overlay)
+    else
+        warped_overlay = Observable(fill!(similar(parent(template), promote_type(typeof(missingval), eltype(A))), missingval))
+        _plot!(ax2, warped_overlay; colormap=(:viridis, 0.2), transparency=false)
+    end
+    onany(knownpoints, unknownpoints) do k, u
+        @show "warping"
+        (dragging1[] || dragging2[]) && return nothing # Dont update during drag
+        len = min(length(k), length(u))
+        (length(k) == length(u) && len >= 3 * poly) || return nothing
+        points = points2table((known=k[1:len], unknown=u[1:len]))
+        if A isa AbstractVector
+            w = linearwarp(A; template, points, missingval, poly)
+            _plot!(ax2, w)
+            # warped_vector_overlay[] = linearwarp(A; template, points, missingval, poly)
+            # notify(warped_vector_overlay)
+        else
+            warped_overlay[] = parent(linearwarp(A; template, points, missingval, poly))
+            notify(warped_overlay)
+        end
+        return nothing
+    end
+    return knownpoints, unknownpoints
 end
 
 
@@ -101,15 +113,15 @@ or fitted linear models for x and y in the tuple `models`.
 
 Gaps are filled with `missingval`.
 """
-function linearwarp(A; template, points=nothing, models::Union{Nothing,Tuple}=nothing, missingval=missing)
-    # @show points size(A) size(template)
+function linearwarp(A::AbstractArray; 
+    template::Raster, points=nothing, models::Union{Nothing,Tuple}=nothing, missingval=missing, poly=1
+)
     x_model, y_model = if isnothing(models) 
         isnothing(points) && error("pass either `points::Tuple` to fit or fitted `models::Tuple`")
-        _fitlinearmodels(points)
+        _fitlinearmodels(points, poly)
     else
         models
     end
-    # display(x_model); display(y_model)
     pixelpoints = vec(collect((x_known = x, y_known=y) for (x, y) in Tuple.(CartesianIndices(template))))
     xs = round.(Int, predict(x_model, pixelpoints))
     ys = round.(Int, predict(y_model, pixelpoints))
@@ -123,9 +135,44 @@ function linearwarp(A; template, points=nothing, models::Union{Nothing,Tuple}=no
     end
     return Awarped
 end
+function linearwarp(geoms::AbstractVector; 
+    template::Raster, points=nothing, models::Union{Nothing,Tuple}=nothing, poly=1, kw...
+)
+    x_model, y_model = if isnothing(models) 
+        isnothing(points) && error("pass either `points::Tuple` to fit or fitted `models::Tuple`")
+        _fitlinearmodels(points, poly)
+    else
+        models
+    end
+    # display(x_model); display(y_model)
+    lx, ly = lookup(template, (X, Y))
+    warped_geoms = map(geoms) do geom
+        pixelpoints = map(GI.getpoint(geom)) do point
+            (x_known = GI.x(point), y_known = GI.y(point))
+        end
+        xs = predict(x_model, pixelpoints)
+        ys = predict(y_model, pixelpoints)
+        if GI.geomtrait(geom) isa GI.AbstractLineStringTrait
+            LineString(map(Point2, zip(xs, ys)))
+        elseif GI.geomtrait(geom) isa GI.AbstractPolygonTrait
+            Polygon(map(Point2, zip(xs, ys)))
+        end
+    end
+    return warped_geoms
+end
 
-function _fitlinearmodels(points)
-    x_model = lm(@formula(x_unknown ~ x_known + y_known), points)
-    y_model = lm(@formula(y_unknown ~ y_known + x_known), points)
+lookup_at(lookups, I) = map(getindex, lookups, I)
+
+function _fitlinearmodels(points, poly)
+    if poly == 1
+        x_model = lm(@formula(x_unknown ~ x_known + y_known), points)
+        y_model = lm(@formula(y_unknown ~ y_known + x_known), points)
+    elseif poly == 1
+        x_model = lm(@formula(x_unknown ~ x_known^2 + y_known^2 + x_known + y_known), points)
+        y_model = lm(@formula(y_unknown ~ y_known^2 + x_known^2 + y_known + x_known), points)
+    else
+        error("poly above 2 does not really work")
+    end
+
     return x_model, y_model
 end

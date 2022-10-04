@@ -53,7 +53,7 @@ function _categorize(pixels::AbstractArray, points;
     if segmented
         segments = fast_scanning(pixels, scan_threshold; match)
         println("categorizing...")
-        categorized_segments = for k in keys(segments.segment_means)
+        for k in keys(segments.segment_means)
             mn = segments.segment_means[k]
             ctg = mn.category 
             if ctg == 0 
@@ -62,7 +62,6 @@ function _categorize(pixels::AbstractArray, points;
             end
         end
         println("creating output...")
-        segmented_map = map(i -> IS.segment_mean(segments, i), IS.labels_map(segments))
         category_ints = map(IS.labels_map(segments)) do i
             IS.segment_mean(segments, i).category
         end

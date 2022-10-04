@@ -1,12 +1,12 @@
 
 selectmultiple(A::Raster, fig, ax; kw...) = selectmultiple(parent(A), fig, ax; kw...)
 function selectmultiple(A, fig, ax; transparency=false, points, kw...)
-    _heatmap!(ax, A; transparency) 
+    _plot!(ax, A; transparency) 
     positions = Observable(points)
     Makie.scatter!(ax, positions, color=1:30, colormap=:reds)
     labels = lift(p -> string.(1:length(p)), positions)
     Makie.text!(ax, labels; position=positions)
-    dragselect!(fig, ax, positions, size(A); kw...)
+    dragselect!(fig, ax, positions; kw...)
     return positions
 end
 
@@ -21,7 +21,7 @@ function manualinput(A::Raster; points=Point2{Float32}[], keys=nothing)
     Makie.lines!(ax, positions; color=:red)
     Makie.scatter!(ax, positions; color=:red)
 
-    dragselect!(fig, ax, positions, size(A); caninsert=true)
+    dragselect!(fig, ax, positions; caninsert=true)
     screen = display(fig)
     println("Select polygons in rasters, then close the window")
     while screen.window_open[] 
@@ -46,7 +46,7 @@ _getobs(positions, section::Observable) = _getobs(positions, section[])
 _getobs(positions, section::Int) = positions[section]
 # _getobs(positions, section::Tuple{}) = positions
 
-function dragselect!(fig, ax, positions::Vector{<:Observable{<:Vector{<:Union{<:Point,<:Polygon},}}}, pixelsize; 
+function dragselect!(fig, ax, positions; 
     selected=Ref(false), dragging=Ref(false), caninsert=false, section=nothing
 )
     selected[] = false
@@ -176,6 +176,21 @@ end
 
 inbounds((x1, x2), x) = x >= min(x1, x2) && x <= max(x1, x2)
 
+function _plot!(ax, A; kw...) 
+    if _typeof(A) isa AbstractVector
+        if _eltype(A) <: Polygon
+            poly!(ax, A; kw...)
+        else
+            lines!(ax, A; kw...)
+        end
+    else
+        _heatmap!(ax, A; kw...)
+    end
+end
+_typeof(o::Observable) = typeof(o[])
+_typeof(x) = typeof(x)
+_eltype(x) = eltype(_typeof(x))
+
 function _heatmap!(ax, A; colormap=:viridis, transparency=false) 
     if eltype(A) <: Colorant
         Makie.heatmap!(ax, Float64.(Gray.(A)); colormap, transparency)
@@ -196,11 +211,11 @@ function points2table(pointvecs::NamedTuple{Keys}) where Keys
             NamedTuple{(Symbol("x_$K"), Symbol("y_$K"))}(map(Float64, xy))
         end
     end
-    return merge.(pointvecs...)
+    return merge.(points...)
 end
 
-table2points(A::AbstractArray{Point2}; keys=nothing) = _table2points(A, keys)
-table2points(A::AbstractArray{Point2}, ::Nothing) = A
+table2points(A; keys=nothing) = _table2points(A, keys)
+table2points(A::AbstractArray{<:NamedTuple}) = _table2points(A, keys(first(A)))
 function _table2points(table, keys::NTuple{4})
     knownpoints = Point2{Float32}.(collect(zip(Tables.getcolumn(table, keys[1]), Tables.getcolumn(table, keys[2]))))
     unknownpoints = Point2{Float32}.(collect(zip(Tables.getcolumn(table, keys[3]), Tables.getcolumn(table, keys[4]))))

@@ -1,62 +1,40 @@
 
 function fill_gaps(src::AbstractArray;
-    known,
     categories=(),
-    neighborhood=Moore{2,2}(),
-    keep_neigborless=false,
+    neighborhood=VonNeumann{2,2}(),
     missingval=missing,
-    despecle=true,
+    stats,
+    match,
+    known,
+    original,
 )
-        # src = broadcast_neighborhood(Moore{1,2}(), src, known) do hood, v, kn
-            # kn != missingval && kn in categories && return kn
-            # (count(==(v), hood) > 2) ? v : missingval
-        # end
-        src = broadcast_neighborhood(Moore{2,2}(), src, known) do hood, v, kn
-            kn != missingval && kn in categories && return kn
-            # If neighbors are missingval, return missingval
-            missingcount = count(==(missingval), hood)
-            matchcount = count(==(v), hood)
-            if !isequal(v, missingval) && v in categories
-                return v
-                # if matchcount > 7
-                    # return v
-                # elseif missingcount > 18
-                    # return missingval
-                # else
-                    # catcounts = _countcats(hood, categories)
-                    # n, i = findmax(catcounts)
-                    # if n > missingcount - 5
-                        # return categories[findmax(catcounts)[2]]
-                    # else
-                        # return missingval
-                    # end
-                # end
-            elseif v == missingval
-                if missingcount > 18
-                    return missingval
-                else
-                    catcounts = _countcats(hood, categories)
-                    n, i = findmax(catcounts)
-                    return n > 2 ? categories[i] : missingval
-                end
-            else
-                missingval
+    broadcast_neighborhood(neighborhood, src, known, original) do hood, v, kn, o
+        kn != missingval && kn in categories && return kn
+        missingcount = count(==(missingval), hood)
+        if !isequal(v, missingval) && v in categories
+            return v # This is a valid category already, return as is
+        elseif v == missingval
+            # If neighbors are mostly missingval, return missingval
+            missingcount > (length(hood) - 4) && return missingval
+            catcounts = _countcats(hood, categories)
+            maxcount, im = findmax(catcounts)
+            maxcount > 1 || return missingval
+            secondcount, is = reduce(enumerate(catcounts); init=(0=>0)) do (xacc, iacc), (i, x)
+                i == im && return xacc => iacc # skip the max category
+                x > xacc ? x => i : xacc => iacc
             end
+            i = if secondcount > 1
+                a = _category_error(o, stats[im], Val{(:color,)}())
+                b = _category_error(o, stats[is], Val{(:color,)}())
+                a <= b ? im : is  
+            else
+                im
+            end
+            return categories[i]
+        else
+            missingval
         end
-    # end
-    return src
-    # return broadcast_neighborhood(neighborhood, src, CartesianIndices(src)) do hood, v, I
-    #     if v == missingval
-    #         catcounts = _countcats(hood, categories)
-    #         if all(map(==(0), catcounts))
-    #             keep_neigborless ? v : missingval
-    #         else
-    #             return categories[findmax(catcounts)[2]]
-    #         end
-    #     else
-    #         return v
-    #     end
-    # end
+    end
 end
 
 function _countcats(hood, categories)
