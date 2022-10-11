@@ -36,7 +36,7 @@ function selectcolors(raw_map::AbstractArray{C};
     prune_threshold=0,
     stripe_radius=2,
     line_threshold=0.1,
-    template,
+    template=nothing,
     blur_repeat=1,
     fill_repeat=1,
     segment=false,
@@ -582,7 +582,7 @@ function _mean_color(A::AbstractMatrix{C}, pointvec::AbstractVector) where C<:Co
 end
 
 function _stds(A)
-    stds = Neighborhoods.broadcast_neighborhood(Window{2}(), A) do hood, val
+    stds = Neighborhoods.broadcast_neighborhood(Window{2}(), A) do hood
         rs = std(map(n -> n.r, hood))
         gs = std(map(n -> n.g, hood))
         bs = std(map(n -> n.b, hood))
@@ -595,5 +595,5 @@ end
 function _aslog(range)
     x = first(range)
     y = last(range)
-    newrange = (((2 .^ (x:step(range):y) .- (2^x)) ./ 2^y)) .* (y - x) .+ x
+    return (((2 .^ (x:step(range):y) .- (2^x)) ./ 2^y)) .* (y - x) .+ x
 end

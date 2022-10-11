@@ -6,9 +6,8 @@ B. Smolka1, M. Szczepanski, K.N. Plataniotis, and A.N. Venetsanopoulos
 function blur(A; hood=Window{1}(), repeat=1)
     # m = maximum(stds) * threshold
     for _ in 1:repeat
-        A = broadcast_neighborhood(hood, A) do h, v
-            mean(h)
-            # v.alpha == 0 ? v : _clean_mean(h, v)
+        A = broadcast_neighborhood(hood, A) do h
+            mean(neighbors(h))
         end
     end
     return A

@@ -3,7 +3,7 @@ module MapRasterization
 using Colors
 using ColorVectorSpace
 using Combinatorics
-using DynamicGrids
+using Neighborhoods
 using GeometryBasics
 using GLM
 using InvertedIndices
@@ -18,7 +18,6 @@ import Tables
 import ImageSegmentation as IS
 import GeoInterface as GI
 
-using DynamicGrids.Neighborhoods
 using Rasters.LookupArrays
 
 include("balance.jl")

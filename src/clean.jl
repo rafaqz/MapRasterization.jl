@@ -8,7 +8,7 @@ function fill_gaps(src::AbstractArray;
     known,
     original,
 )
-    broadcast_neighborhood(neighborhood, src, known, original) do hood, v, kn, o
+    broadcast_neighborhood(neighborhood, src, src, known, original) do hood, v, kn, o
         kn != missingval && kn in categories && return kn
         missingcount = count(==(missingval), hood)
         if !isequal(v, missingval) && v in categories
@@ -39,7 +39,7 @@ end
 
 function _countcats(hood, categories)
     map(categories) do c
-        ds = DynamicGrids.distances(hood)
+        ds = distances(hood)
         acc = zero(1/first(ds))
         for i in 1:length(hood)
             n = hood[i]

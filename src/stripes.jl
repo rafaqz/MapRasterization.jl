@@ -5,11 +5,11 @@ function _pos(i, j, s)
     b = map(1:s) do x
         (i * x, j*x)
     end
-    LayeredPositional((a=Positional(a...), b=Positional(b...)))
+    Neighborhoods.Layered(a=Positional(a...), b=Positional(b...))
 end
 
 function cross_layer_neighborhood(radius)
-    hood = LayeredPositional(
+    hood = Neighborhoods.Layered(
         vert=_pos(1, 0, radius),
         horz=_pos(0, 1, radius),
         angle45=_pos(1, 1, radius),
@@ -18,7 +18,7 @@ function cross_layer_neighborhood(radius)
 end
 
 function _stripes(img; radius=3, hood=cross_layer_neighborhood(radius))
-    stripes = Neighborhoods.broadcast_neighborhood(hood, img; padval=(0.0, 0.0)) do hood, val
+    stripes = Neighborhoods.broadcast_neighborhood(hood, img, img) do hood, val
         (; h, s, l) = HSL(val)
         dirs = map(neighbors(hood)) do layer
             # Take the minimum of the mean stripiness of either side
