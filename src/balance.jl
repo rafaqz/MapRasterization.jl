@@ -1,5 +1,5 @@
 function _balance(A, points; category_bitindex)
-    little_table = map(points[category_bitindex]) do pointvec
+    little_table = map(points[1:1]) do pointvec
         category_colors = map(pointvec) do (i, j)
             RGB(A[round(Int, i), round(Int, j)])
         end
@@ -13,26 +13,42 @@ function _balance(A, points; category_bitindex)
     if length(little_table) < 8
         return A .* 1.0
     end
-    big_table = map(CartesianIndices(A)) do I
-        (i=I[1], j=I[2])
-    end |> vec
     models = (
         r=lm(@formula(r ~ i^3 + i^2 + i + j^3 + j^2 + j), little_table),
         g=lm(@formula(g ~ i^3 + i^2 + i + j^3 + j^2 + j), little_table),
         b=lm(@formula(b ~ i^3 + i^2 + i + j^3 + j^2 + j), little_table),
     )
-    predictions = map(models) do model
-        reshape(predict(model, big_table), size(A))
-    end
+    predictions = _predict(models, A)
     means = map(mean, predictions)
-    balanced_map = broadcast(A, predictions...) do x, p_r, p_g, p_b 
-        x1 = RGB(x)
+    balanced_map = _final_balance(A, predictions, means)
+    return balanced_map
+end
+
+
+function _final_balance(A, predictions::NamedTuple, means)
+    out = similar(A, RGB{Float64})
+    (; r, b, g) = predictions
+    for i in eachindex(A)  
+        x1 = RGB(A[i])
+        p_r = r[i]
+        p_b = b[i]
+        p_g = g[i]
         # Subtract the prediction from each pixel, and add the mean
         result = (x1.r-p_r+means.r, x1.g-p_g+means.g, x1.b-p_b+means.b)
         # Clamp and convert to Float64
-        RGB(map(c -> min(1, max(c, 0)), result)...) .* 1.0
+        out[i] = RGB(map(c -> min(1, max(c, 0)), result)...) .* 1.0
     end
-    return balanced_map
+    return out
+end
+
+function _predict(models, A)
+    big_table = (
+        i=vec(map(I -> I[1], CartesianIndices(A))),
+        j=vec(map(I -> I[2], CartesianIndices(A))),
+    )
+    return map(models) do model
+        Float64.(reshape(predict(model, big_table), size(A)))
+    end
 end
 
 # function balance(A, points)

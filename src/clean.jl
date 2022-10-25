@@ -7,8 +7,10 @@ function fill_gaps(src::AbstractArray;
     match,
     known,
     original,
+    mask,
 )
-    broadcast_neighborhood(neighborhood, src, src, known, original) do hood, v, kn, o
+    broadcast_neighborhood(neighborhood, src, src, known, original, mask) do hood, v, kn, o, m
+        m && return v
         kn != missingval && kn in categories && return kn
         missingcount = count(==(missingval), hood)
         if !isequal(v, missingval) && v in categories
@@ -54,7 +56,7 @@ end
 const sm = IS.segment_mean
 const spc = IS.segment_pixel_count
 
-function _remove_lines(A, known_categories; categories, line_threshold=0.01, prune_threshold=20, kw...)
+function _clean(A, known_categories; categories, line_threshold=0.01, prune_threshold=20, kw...)
     pick_neighbor(i, j) = sm(segments, j).color == 0 ? typemax(Int) : -spc(segments, j)
     pick_cell(i) = (sm(segments, i).color != 0 && spc(segments, i) < prune_threshold)
     scan_threshold = 0.000000001
@@ -63,8 +65,8 @@ function _remove_lines(A, known_categories; categories, line_threshold=0.01, pru
     for (label, count) in segments.segment_pixel_count
         bbox = segments.segment_bbox[label]
         region = CartesianIndices(bbox[2] - bbox[1] + CartesianIndex(1, 1))
-        area = length(region)
-        ratio = count / area 
+        area = max(size(region)...)^2
+        ratio = count / area
         meanpixel = segments.segment_means[label]
         if !(meanpixel.color in categories)
             segments.segment_means[label] = PixelProp(zero(meanpixel.color), meanpixel.std, meanpixel.stripe, 0)

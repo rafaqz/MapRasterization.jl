@@ -3,14 +3,15 @@ module MapRasterization
 using Colors
 using ColorVectorSpace
 using Combinatorics
-using Neighborhoods
 using GeometryBasics
 using GLM
+using IntervalSets
 using InvertedIndices
+using LinearAlgebra
 using Makie
 using MixedModels
+using Neighborhoods
 using Observables
-using LinearAlgebra
 using Rasters
 using Statistics
 

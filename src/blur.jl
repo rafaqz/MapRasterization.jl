@@ -3,7 +3,7 @@
 From: Fast Modified Vector Median Filter
 B. Smolka1, M. Szczepanski, K.N. Plataniotis, and A.N. Venetsanopoulos
 =#
-function blur(A; hood=Window{1}(), repeat=1)
+function blur(A::AbstractArray; hood=Window{1}(), repeat=1)
     # m = maximum(stds) * threshold
     for _ in 1:repeat
         A = broadcast_neighborhood(hood, A) do h
