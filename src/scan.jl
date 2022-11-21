@@ -1,9 +1,9 @@
 const DEFAULT_MATCH = Val{(:color,:std,:stripe)}()
 
-struct PixelProp{C,SD<:Real,SP<:Tuple{Real,Real}}
+struct PixelProp{C}
     color::C
-    std::SD
-    stripe::SP
+    std::Float64
+    stripe::Tuple{Float64,Float64}
     category::Int
 end
 
@@ -27,18 +27,16 @@ function _mergecategory(a, b)
     end
 end
 
-Base.zero(::Type{<:PixelProp{C,SD,Tuple{SP,SP}}}) where {C,SD,SP} =
-    PixelProp(zero(C), zero(SD), (zero(SP), zero(SP)), 0) 
-Base.oneunit(::Type{<:PixelProp{C,SD,Tuple{SP,SP}}}) where {C,SD,SP} =
-    PixelProp(oneunit(C), oneunit(SD), (oneunit(SP), oneunit(SP)), 0)
-Base.one(::Type{<:PixelProp{C,SD,Tuple{SP,SP}}}) where {C,SD,SP} =
-    PixelProp(one(C), one(SD), (one(SP), one(SP)), 0)
-Base.convert(::Type{<:PixelProp{C,SD,Tuple{SP,SP}}}, p::PixelProp) where {C,SD,SP} =
-    PixelProp(C(p.color), SD(p.std), (SP(p.stripe[1]), SP(p.stripe[2])), p.category)
-Base.convert(::Type{<:PixelProp{C}}, p::PixelProp) where {C,SD,SP} = PixelProp(C(p.color), p.std, p.stripe, p.category) 
+Base.zero(::Type{<:PixelProp{C}}) where {C} =
+    PixelProp(zero(C), 0.0, (0.0, 0.0), 0) 
+Base.oneunit(::Type{<:PixelProp{C}}) where {C} = PixelProp(oneunit(C), 1.0, (1.0, 1.0), 0)
+Base.one(::Type{<:PixelProp{C}}) where {C} = PixelProp(one(C), 1.0, (1.0, 1.0), 0)
+Base.convert(::Type{<:PixelProp{C}}, p::PixelProp) where {C} =
+    PixelProp(C(p.color), p.std, (p.stripe[1], p.stripe[2]), p.category)
+Base.convert(::Type{<:PixelProp{C}}, p::PixelProp) where {C} = PixelProp(C(p.color), p.std, p.stripe, p.category) 
 Base.convert(::Type{T}, p::PixelProp) where T = Base.convert(T, p.color)
 
-IS.accum_type(::Type{P}) where P <: PixelProp{C,SD,SP} where {C,SD,SP} = PixelProp{IS.accum_type(C),SD,SP}
+IS.accum_type(::Type{P}) where P <: PixelProp{C} where {C} = PixelProp{IS.accum_type(C)}
 
 meantype(::Type{T}) where T = typeof(zero(IS.accum_type(T))/2)
 

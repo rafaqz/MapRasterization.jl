@@ -16,8 +16,8 @@ end
 #     output::O
 # end
 
-@enum Panel zero_panel source_panel balance_panel blur_panel categorize_panel clean_panel fill_panel difference_panel heatmap_panel polygons_panel warp_panel
-const MAPTITLES = ["Source", "Balanced", "Blurred", "Categorized", "Cleaned", "Filled", "Difference", "Final"]
+@enum Panel zero_panel source_panel balance_panel blur_panel categorize_panel clean_panel fill_panel difference_panel heatmap_panel
+const MAPTITLES = ["Source", "Balanced", "Smoothed", "Categorized", "Cleaned", "Filled", "Difference", "Final"]
 const MAPKEYS = (:raw, :balanced, :blurred, :rgba_categorized, :rgba_cleaned, :rgba_filled, :rgba_difference, :filled)
 
 function selectcolors(raw_map::AbstractArray, map_selection::MapSelection; kw...)
@@ -29,21 +29,22 @@ end
 #     selectcolors(raw_map; points, map_selection.settings..., kw...)
 # end
 function selectcolors(raw_map::AbstractArray{C};
-    ncategories=5,
+    ncategories::Int=5,
     match=(:color, :std, :stripe),
-    points=Vector{Point2{Float32}}[Point2{Float32}[] for _ in 1:ncategories],
-    polygons=polygons=[[[Point2(100.0f0, 100.0f0)]] for _ in 1:ncategories],
-    scan_threshold=0.001,
-    prune_threshold=0,
-    stripe_radius=2,
-    line_threshold=0.1,
+    points=[Point2{Float32}[] for _ in 1:ncategories],
+    polygons=[[[Point2(100.0f0, 100.0f0)]] for _ in 1:length(points)],
+    scan_threshold::Float64=0.001,
+    prune_threshold::Int64=0,
+    stripe_radius::Int64=2,
+    line_threshold::Float64=0.1,
     template=nothing,
-    blur_repeat=1,
-    fill_repeat=1,
-    segment=false,
+    blur_repeat::Int=1,
+    fill_repeat::Int=1,
+    segment::Bool=false,
     category_tolerances=[DEFAULT_CATEGORY_TOLERANCE for _ in 1:length(points)],
-    category_keep=Bool[true for _ in 1:length(points)],
-    category_name=String[" " for _ in 1:length(points)],
+    category_keep=[true for _ in 1:length(points)],
+    category_balance=[x == 1 for x in 1:length(points)],
+    category_name=[" " for _ in 1:length(points)],
     kw...
 ) where C
     # Clean up polygon types
@@ -55,6 +56,12 @@ function selectcolors(raw_map::AbstractArray{C};
             return b
         end
     end
+    points = convert(Vector{Vector{Point2{Float32}}}, points)
+    polygons = convert(Vector{Vector{Vector{Point2{Float32}}}}, polygons)
+    category_name = convert(Vector{String}, category_name)
+    category_tolerances = convert(Vector{Float64}, category_tolerances)
+    category_keep = convert(Vector{Bool}, category_keep)
+    category_balance = convert(Vector{Bool}, category_balance)
     match = Tuple(map(Symbol, match))
     println("Creating observables...")
     settings_obs = (; map(Observable,
@@ -69,6 +76,7 @@ function selectcolors(raw_map::AbstractArray{C};
     polygons_obs = map(Observable, polygons)
     category_tolerances = map(Observable, category_tolerances)
     category_keep = map(Observable, category_keep)
+    category_balance = map(Observable, category_balance)
     category_name = map(Observable, category_name)
     obs = (;
         settings=settings_obs,
@@ -76,10 +84,12 @@ function selectcolors(raw_map::AbstractArray{C};
         polygons=polygons_obs,
         category_tolerances,
         category_keep,
+        category_balance,
         category_name,
     )
     println("Building maps...")
     maps = _make_maps(raw_map, obs)
+    @show typeof(maps)
 
     println("Building layout...")
     fig = Figure()
@@ -106,6 +116,7 @@ function selectcolors(raw_map::AbstractArray{C};
         category_tolerances=map(x -> x.value[], layout.category_widgets.tolerance_sliders),
         category_name=map(x -> x.displayed_string[], layout.category_widgets.name_textboxes),
         category_keep=map(x -> x.active[], layout.category_widgets.keep_toggles),
+        category_balance=map(x -> x.active[], layout.category_widgets.balance_toggles),
         fill_repeat=s.fill_repeat.value[],
         stripe_radius=s.stripe_radius.value[],
         match=_unwrap(_match_from_bools(map(m -> m.active[], layout.match_toggles))),
@@ -131,7 +142,6 @@ function _layout_figure!(fig, maps, obs, polygons)
     hover_label = Label(fig, "")
     # Categories
     category_grid, category_widgets = _make_category_widgets!(fig, maps, obs)
-    # Maps
     # Layout
     fig[1, 1:3] = panel
     panel[1, 1:2] = button_grid
@@ -141,6 +151,7 @@ function _layout_figure!(fig, maps, obs, polygons)
     panel[11, 1:2] = hover_label
     fig[1, 4] = category_grid
 
+    # Plot maps
     axis, plots = _make_axis!(plot_grid, maps, current_panel)
 
     # Lump all layout objects in a NamedTuple
@@ -176,10 +187,12 @@ function _moveaxis(axis::Axis, x)
 end
 
 _kept_categories(bitindex::AbstractVector{Bool}) = (1:length(bitindex))[bitindex]
-_kept_categories(widgets::NamedTuple) = _kept_categories(_category_bitindex(widgets))
+_kept_categories(widgets::NamedTuple) = _kept_categories(_category_bitindex(widgets.keep_toggles))
+_balance_categories(bitindex::AbstractVector{Bool}) = (1:length(bitindex))[bitindex]
+_balance_categories(widgets::NamedTuple) = _kept_categories(_category_bitindex(widgets.keep_toggles))
 
-function _category_bitindex(category_widgets::NamedTuple)
-    map(t -> t.active[], category_widgets.keep_toggles)
+function _category_bitindex(toggles::Vector)
+    map(t -> t.active[], toggles)
 end
 
 function _make_match_toggles!(fig, match)
@@ -206,16 +219,16 @@ function _make_maps(raw_map::AbstractMatrix, obs)
     points = map(getindex, obs.points)
     raw = Observable(raw_map)
     println("Balancing...")
-    balanced = Observable(_balance(raw_map, points; category_bitindex=map(getindex, obs.category_keep)))
+    balanced = Observable(_balance(raw_map, points; category_bitindex=map(getindex, obs.category_balance)))
     known_categories = Observable(_set_categories!(zeros(Int, size(raw_map)), points))
     println("Blurring...")
     blurred = Observable(
         blur(balanced[]; repeat=s.blur_repeat[])
     )
     println("Calculating stripes...")
-    stripe = Observable(_stripes(blurred[], radius=s.stripe_radius[]))
+    stripe = map(_ -> (0.0, 0.0), blurred[]) |> Observable
     println("Calculating texture...")
-    std = Observable(_stds(blurred[]))
+    std = map(_ -> 0.0, blurred[]) |> Observable
     println("Allocating...")
     categorized = Observable(fill!(similar(raw_map, Int), 0))
     cleaned = Observable(fill!(similar(raw_map, Int), 0))
@@ -246,21 +259,26 @@ function _make_category_widgets!(fig, maps, obs)
     color_buttons[1].strokecolor = :black
     tolerance_sliders = map(t -> _tolerance_slider(fig, t), obs.category_tolerances)
     keep_toggles = map(k -> _keep_toggle(fig, k), obs.category_keep)
+    balance_toggles = map(k -> _keep_toggle(fig, k), obs.category_balance)
     name_textboxes = map(k -> _name_textbox(fig, k), obs.category_name)
-    widget_labels = map(["Color";; "Name";; "Tolerance";; "Keep";;]) do s
+    # widget_labels = map(["Color";; "Name";; "Tolerance";; "Keep"]) do s
+    widget_labels = map(["Color";; "Name";; "Tolerance";; "Keep";; "Balance";;]) do s
         Label(fig, s)
     end
     grid[2, 1] = grid!(widget_labels)
-    _set_category_rows!(fig, grid, (; color_buttons, name_textboxes, tolerance_sliders, keep_toggles))
+    _set_category_rows!(fig, grid, (; color_buttons, name_textboxes, tolerance_sliders, keep_toggles, balance_toggles))
 
-    widgets = (; color_buttons, name_textboxes, tolerance_sliders, keep_toggles, clear_button, color_number, plus_button)
+    widgets = (; color_buttons, name_textboxes, tolerance_sliders, keep_toggles, balance_toggles, clear_button, color_number, plus_button)
     return grid, widgets
 end
 
 function _set_category_rows!(fig, grid, category_widgets)
-    widgets = category_widgets[(:color_buttons, :name_textboxes, :tolerance_sliders, :keep_toggles)]
-    widget_rows = map(widgets...) do b, tb, s, tg
-        [b;; tb;; s;; tg;;]
+    # widgets = category_widgets[(:color_buttons, :name_textboxes, :tolerance_sliders, :keep_toggles)]
+    # widget_rows = map(widgets...) do b, tb, s, ktg
+        # [b;; tb;; s;; ktg;;]
+    widgets = category_widgets[(:color_buttons, :name_textboxes, :tolerance_sliders, :keep_toggles, :balance_toggles)]
+    widget_rows = map(widgets...) do b, tb, s, ktg, btg
+        [b;; tb;; s;; ktg;; btg;;]
     end
     grid[3:10, 1] = grid!(vcat(widget_rows...), default_rowgap=0)
 end
@@ -269,12 +287,12 @@ _color_button(fig, points, source, n) =
     Button(fig; label=string(n), height=21, width=21, buttoncolor=_mean_color(source, points[n]))
 _tolerance_slider(fig, t) = Slider(fig; height=21, startvalue=t, width=60, range=-2.0:0.01:20.0, horizontal=true)
 _keep_toggle(fig, active) = Toggle(fig; active, height=21)
-_name_textbox(fig, name) = Textbox(fig; stored_string=name, height=21, valign=:top, textpadding=(1,1,1,1), cornerradius=1)
+_name_textbox(fig, name) = Textbox(fig; stored_string=name, height=21, valign=:top, textpadding=(1, 1, 1, 1), cornerradius=1)
 
 function _make_buttons!(fig, obs)
     grid = GridLayout(tellwidth = false)
     grid[1, 1] = balance = Button(fig; label="balance")
-    grid[1, 2] = blur = Button(fig; label="blur")
+    grid[1, 2] = blur = Button(fig; label="smooth")
     grid[1, 3] = categorize = Button(fig; label="categorize")
     grid[1, 4] = clean = Button(fig; label="clean")
     grid[1, 5] = fill = Button(fig; label="fill")
@@ -298,7 +316,7 @@ function _make_sliders!(fig, obs)
     blur_repeat_labelled = labelslider!(fig, "blur iterations", 0:30; height=20, tellwidth=false, sliderkw=(; startvalue=s.blur_repeat))
     slidergrid[1, 1] = blur_repeat_labelled.layout
     T = typeof(blur_repeat_labelled.layout)
-    panel_sliders = fill(T[], length(instances(Panel)))
+    panel_sliders = fill(T[], length(MAPTITLES))
     panel_sliders[Int(blur_panel)] = [blur_repeat_labelled.layout]
 
     # Categorise
@@ -378,22 +396,24 @@ function _connect_observables!(fig, maps, obs, layout, polygons)
         end
     end
     on(category_widgets.plus_button.clicks) do _
-        (; color_buttons, name_textboxes, tolerance_sliders, keep_toggles) = category_widgets
+        (; color_buttons, name_textboxes, tolerance_sliders, keep_toggles, balance_toggles) = category_widgets
         pointvec = Observable(Point2{Float32}[])
         push!(obs.points, pointvec)
-        polygonvec = Observable((eltype(obs.settings.polygons[1][])[]))
-        push!(obs.settings.polygons, polygonvec)
+        polygonvec = Observable([[Point2(100.0f0, 100.0f0)]])
+        push!(obs.polygons, polygonvec)
         n = obs.settings.ncategories[] = length(obs.points)
 
         newbutton = _color_button(fig, map(getindex, obs.points), maps.blurred[], n)
         newslider = _tolerance_slider(fig, DEFAULT_CATEGORY_TOLERANCE)
-        newtoggle = _keep_toggle(fig, true)
-        newtoggle = _name_textbox(fig, "")
+        newkeeptoggle = _keep_toggle(fig, true)
+        newbalancetoggle = _keep_toggle(fig, false)
+        newtextbox = _name_textbox(fig, " ")
 
         push!(color_buttons, newbutton)
         push!(tolerance_sliders, newslider)
         push!(name_textboxes, newtextbox)
-        push!(keep_toggles, newtoggle)
+        push!(keep_toggles, newkeeptoggle)
+        push!(balance_toggles, newbalancetoggle)
 
         on(newbutton.clicks) do _
             _on_click_color_button!(color_buttons, point_category, n)
@@ -427,15 +447,19 @@ function _connect_observables!(fig, maps, obs, layout, polygons)
     end
     on(buttons.balance.clicks) do _
         maps.balanced[] = _balance(maps.raw[], map(getindex, obs.points);
-            category_bitindex=_category_bitindex(category_widgets)
+            category_bitindex=_category_bitindex(category_widgets.keep_toggles)
         )
         _update_panel(layout, Int(balance_panel))
         notify(maps.balanced)
     end
     on(buttons.blur.clicks) do _
         maps.blurred[] = blur(maps.balanced[]; repeat=sliders.blur_repeat.value[])
-        maps.stripe[] = _stripes(maps.blurred[], radius=sliders.stripe_radius.value[])
-        maps.std[] = _stds(maps.blurred[])
+        if obs.settings.match[2][] 
+            maps.std[] = _stds(maps.blurred[])
+        end
+        if obs.settings.match[3][] 
+            maps.stripe[] = _stripes(maps.blurred[], radius=sliders.stripe_radius.value[])
+        end
         _update_panel(layout, Int(blur_panel))
         notify(maps.blurred)
     end
@@ -490,11 +514,12 @@ function _connect_observables!(fig, maps, obs, layout, polygons)
         active=obs.settings.point_select_active,
     )
 
-    map_stages = map(MAPKEYS) do key
+    map_stages = map((:raw, :balanced, :blurred, :categorized, :cleaned, :filled, :rgba_difference, :filled)) do key
         maps[key]
     end
 
     hover_report!(layout.hover_label.text, fig, axis, map_stages, current_panel)
+
 
     # Why is this type so ridiculous, GeometryBasics?
     T = Polygon{2, Float32, Point2{Float32}, LineString{2, Float32, Point2{Float32}, Base.ReinterpretArray{Line{2, Float32}, 1, Tuple{Point2{Float32}, Point2{Float32}}, TupleView{Tuple{Point2{Float32}, Point2{Float32}}, 2, 1, Vector{Point2{Float32}}}, false}}, Vector{LineString{2, Float32, Point2{Float32}, Base.ReinterpretArray{Line{2, Float32}, 1, Tuple{Point2{Float32}, Point2{Float32}}, TupleView{Tuple{Point2{Float32}, Point2{Float32}}, 2, 1, Vector{Point2{Float32}}}, false}}}}
@@ -598,12 +623,20 @@ end
 
 function on_polygon(polygon_category::Int, point_polygons, category_widgets, maps, axis)
     real_polygons = lift(point_polygons) do ps
-        map(ps) do p
-            Polygon(p)
+        if length(ps) == 0
+            [Polygon([Point2(100.0f0, 100.0f0)])]
+        else
+            map(ps) do p
+                Polygon(p)
+            end
         end
     end
     all_points = lift(point_polygons) do ps
-        reduce(vcat, ps)
+        if length(ps) > 1 
+            reduce(vcat, ps)
+        else
+            [Point2(100.0f0, 100.0f0)]
+        end
     end
     poly_shapes = poly!(axis, real_polygons)
     poly_nodes = scatter!(axis, all_points;
@@ -662,6 +695,7 @@ function _fill(maps, layout, obs, mask)
         )
     end
     return values
+    # return _shrink_grow(values, 7, 9)
 end
 
 function _mean_color(A::AbstractMatrix{C}, pointvec::AbstractVector) where C<:Colorant
@@ -670,7 +704,7 @@ function _mean_color(A::AbstractMatrix{C}, pointvec::AbstractVector) where C<:Co
 end
 
 function _stds(A)
-    stds = Neighborhoods.broadcast_neighborhood(Window{2}(), A) do hood
+    stds = Neighborhoods.broadcast_neighborhood(Window(2), A) do hood
         rs = std(map(n -> n.r, hood))
         gs = std(map(n -> n.g, hood))
         bs = std(map(n -> n.b, hood))

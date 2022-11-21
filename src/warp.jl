@@ -15,6 +15,9 @@ function applywarp(As...; template::Raster, kw...)
         As = map(A -> reorder(A, ForwardOrdered), As)
     end
     template = reorder(template, ForwardOrdered)
+    shifted_dims = map(d -> DimensionalData.maybeshiftlocus(Center(), d), dims(template))
+    template = rebuild(template; dims=shifted_dims)
+
     warped = _warp_from_points(As, template; kw...)
     if length(warped) == 1
         return first(warped)
@@ -32,10 +35,9 @@ function _warp_from_points(As::Tuple{AbstractMatrix,Vararg}, template::Raster; p
     return map(A -> linearwarp(A; template, models, poly, kw...), As)
 end
 function _warp_from_points(As::Tuple{AbstractVector,Vararg}, template::Raster; points, poly=1, kw...)
-    models = _fitlinearmodels(points, poly)
+    models = _fitlinearmodels_b(points, poly)
     return map(A -> linearwarp(A; template, models, poly, kw...), As)
 end
-
 
 """
     select_warp_points(A; template, kw...)
@@ -54,20 +56,20 @@ function select_warp_points(A::AbstractArray; template::AbstractArray,
     ax1 = Makie.Axis(fig[1,1]; title="Source raster with a crs/resolution - `template` kw")
     ax2 = Makie.Axis(fig[1,2]; title="First raster with b crs/resolution")
     screen = display(fig)
-    apoints, bpoints = _select_warp_points(A, template::AbstractArray;
+    apoints_obs, bpoints_obs = _select_warp_points(A, template::AbstractArray;
         points, keys, missingval, fig, ax1, ax2, kw...
     )
     println("Select points in rasters, then close the window")
     while screen.window_open[]
         sleep(0.1)
     end
-    length(apoints[]) == length(bpoints[]) || @warn "Number of selected points not same for each image"
-    l = min(length(apoints[]), length(bpoints[]))
-    return points2table((a=apoints[][1:l], b=bpoints[][1:l]))
+    length(apoints_obs[]) == length(bpoints_obs[]) || @warn "Number of selected points not same for each image"
+    l = min(length(apoints_obs[]), length(bpoints_obs[]))
+    return points2table((a=apoints_obs[][1:l], b=bpoints_obs[][1:l]))
 end
 
-function _select_warp_points(A::AbstractArray, template::AbstractArray;
-    points=nothing, keys=nothing, missingval=missing, fig, ax1, ax2, poly=1, kw...
+function _select_warp_points(A::AbstractArray, template::Raster;
+    points=nothing, keys=nothing, missingval=missing, guide=nothing, fig, ax1, ax2, poly=1, kw...
 )
     if template isa Raster
         template = reorder(template, Y=>ForwardOrdered)
@@ -79,44 +81,43 @@ function _select_warp_points(A::AbstractArray, template::AbstractArray;
     else
         Point2{Float32}[], Point2{Float32}[]
     end
-    apoints = selectmultiple(A, fig, ax1; dragging=dragging1, points=apoints)
-    bpoints = selectmultiple(template, fig, ax2; dragging=dragging2, points=bpoints)
-    hasplotted = false
+    apoints_obs = selectmultiple(A, fig, ax1; dragging=dragging1, points=apoints)
+    bpoints_obs = selectmultiple(template, fig, ax2; dragging=dragging2, points=bpoints, guide)
+    hasplotted = Ref(false)
     if A isa AbstractVector
         warped_overlay = Observable{Vector{eltype(A)}}(eltype(A)[])
     else
         W = fill!(similar(template, promote_type(typeof(missingval), eltype(A))), missingval)
         warped_overlay = Observable{Any}(W)
     end
-    hasplotted = false
-    onany(apoints, bpoints) do a, b
-        println("warping")
+    hasplotted[] = _maybeplotwarp!(ax2, A, template, warped_overlay, apoints_obs[], bpoints_obs[], hasplotted[]; poly, missingval)
+    onany(apoints_obs, bpoints_obs) do a, b
         (dragging1[] || dragging2[]) && return nothing # Dont update during drag
-        len = min(length(a), length(b))
-        (length(a) == length(b) && len >= 3 * poly) || return nothing
-        # if template isa Raster
-        #     b = map(u) do p 
-        #         ds = map(dims(template), Tuple(p)) do d, c
-        #             DimensionalData.rebuild(d, Near(c))
-        #         end
-        #         DimensionalData.dims2indices(template, ds)
-        #     end
-        # end
-        points = points2table((a=a[1:len], b=b[1:len]))
-        w = linearwarp(A; template, points, missingval, poly)
-        warped_overlay[] = parent(w)
-        if !hasplotted
-            if A isa AbstractVector
-                _plot!(ax2, warped_overlay; color=(:red, 0.5), transparency=true)
-            else
-                _plot!(ax2, warped_overlay, colormap=(:viridis, 0.5), transparency=true)
-            end
-            hasplotted = true
-        end
+        hasplotted[] = _maybeplotwarp!(ax2, A, template, warped_overlay, a, b, hasplotted[]; poly, missingval)
         notify(warped_overlay)
         return nothing
     end
-    return apoints, bpoints
+    return apoints_obs, bpoints_obs
+end
+
+function _maybeplotwarp!(ax, A, template::Raster, warped_overlay, a, b, hasplotted; poly, missingval)
+    println("warping")
+    len = min(length(a), length(b))
+    (length(a) == length(b) && len >= 3 * poly) || return hasplotted
+    points = points2table((a=a[1:len], b=b[1:len]))
+    w = linearwarp(A; template, points, missingval, poly)
+    warped_overlay[] = w
+    if !hasplotted
+        if A isa AbstractVector
+            _plot!(ax, warped_overlay; color=(:green, 0.5), transparency=true)
+        else
+            lookups = map(lookup(template, (X, Y))) do l
+                DimensionalData.maybeshiftlocus(Center(), l)
+            end
+            Makie.heatmap!(ax, lookups..., warped_overlay; colormap=(:viridis, 0.5), transparency=true)
+        end
+    end
+    return true
 end
 
 """
@@ -139,10 +140,16 @@ function linearwarp(A::AbstractArray;
     T = promote_type(typeof(missingval), eltype(A))
     B = similar(template, T)
     B .= missingval
-    pixelpoints = vec(collect((x_b=x, y_b=y) for (x, y) in Tuple.(CartesianIndices(B))))
-    a_xs = round.(Int, predict(x_model, pixelpoints))
-    a_ys = round.(Int, predict(y_model, pixelpoints))
-    a_indices = CartesianIndex.(zip(a_xs, ys))
+    pixelpoints = vec(collect((x_b=x, y_b=y) for (x, y) in DimPoints(B)))
+    lookups = lookup(template, (X, Y))
+    a_xs, a_ys = map((x_model, y_model)) do model
+        p = predict(model, pixelpoints)
+        @show first(p) last(p)
+        I = round.(Int, p) 
+        @show first(I) last(I)
+        I
+    end
+    a_indices = CartesianIndex.(zip(a_xs, a_ys))
     b_indices = CartesianIndices(B)
     for (Ia, Ib) in zip(a_indices, b_indices)
         if checkbounds(Bool, A, Ia)
@@ -156,7 +163,7 @@ function linearwarp(geoms::AbstractVector;
 )
     x_model, y_model = if isnothing(models)
         isnothing(points) && error("pass either `points::Tuple` to fit or fitted `models::Tuple`")
-        _fitlinearmodels(points, poly)
+        _fitlinearmodels_b(points, poly)
     else
         models
     end

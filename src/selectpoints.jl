@@ -1,6 +1,7 @@
 
-function selectmultiple(A, fig, ax; transparency=false, points, kw...)
+function selectmultiple(A, fig, ax; guide=nothing, transparency=false, points, kw...)
     _plot!(ax, A; transparency)
+    isnothing(guide) || plot!(ax, guide; color=:red)
     positions = Observable(points)
     Makie.scatter!(ax, positions, color=1:30, colormap=:reds)
     labels = lift(p -> string.(1:length(p)), positions)
@@ -327,10 +328,13 @@ _typeof(x) = typeof(x)
 _eltype(x) = eltype(_typeof(x))
 
 function _heatmap!(ax, A::AbstractDimArray, args...; colormap=:viridis, kw...)
+    lookups = map(lookup(A, (X, Y))) do l
+        DimensionalData.maybeshiftlocus(Center(), l)
+    end
     if eltype(A) <: Colorant
-        Makie.heatmap!(ax, lookup(A, X), lookup(A, Y), Float64.(Gray.(parent(A))); colormap, kw...)
+        Makie.heatmap!(ax, lookups..., Float64.(Gray.(parent(A))); colormap, kw...)
     else
-        Makie.heatmap!(ax, lookup(A, X), lookup(A, Y), parent(A); colormap, kw...)
+        Makie.heatmap!(ax, lookups..., parent(A); colormap, kw...)
     end
 end
 function _heatmap!(ax, A, args...; colormap=:viridis, kw...)

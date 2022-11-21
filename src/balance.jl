@@ -1,5 +1,5 @@
 function _balance(A, points; category_bitindex)
-    little_table = map(points[1:1]) do pointvec
+    little_table = map(points[category_bitindex]) do pointvec
         category_colors = map(pointvec) do (i, j)
             RGB(A[round(Int, i), round(Int, j)])
         end
